@@ -293,9 +293,8 @@ function generatePDF(aiReport, rec, posData, bankTxns, acctSheet, acctIssues, ba
 </body>
 </html>`;
 
-  // Store HTML in a ref and trigger PDF view
-  setPdfHtml(html);
-  setPdfMode(true);
+  // Return the built HTML so the component can switch into PDF view
+  return html;
 }
 
 // ── BEANS ANALYSIS ───────────────────────────────────────────────────
@@ -1462,7 +1461,7 @@ Numbered list of issues requiring attention.`;
                         const txt="THE PEAK COFFEE SHOP\nMONTHLY OWNER REPORT — "+acctSheet+"\n"+"=".repeat(50)+"\n\n"+aiReport;
                         navigator.clipboard.writeText(txt).then(()=>alert("✓ Report copied to clipboard!")).catch(()=>alert("Could not copy. Please select the report text manually."));
                       }} style={{background:B.forest,color:B.white,border:`2px solid ${B.gold}`,padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>📋 Copy Report</button>
-                      <button onClick={()=>generatePDF(aiReport,rec,posData,bankTxns,acctSheet,acctIssues,baristaData)} style={{background:B.gold,color:"#12100a",border:"none",padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>📄 View PDF</button>
+                      <button onClick={()=>{const html=generatePDF(aiReport,rec,posData,bankTxns,acctSheet,acctIssues,baristaData); setPdfHtml(html); setPdfMode(true);}} style={{background:B.gold,color:"#12100a",border:"none",padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>📄 View PDF</button>
                       <button onClick={sendWhatsApp} disabled={waSending} style={{background:waSending?"#7a9e90":B.teal,color:B.white,border:"none",padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:waSending?"not-allowed":"pointer",borderRadius:4,fontWeight:700}}>
                         {waSending?"📱 Sending...":"📱 Send via WhatsApp"}
                       </button>
