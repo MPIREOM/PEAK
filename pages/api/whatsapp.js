@@ -56,7 +56,11 @@ export default async function handler(req, res) {
       if (data.messages || data.contacts) {
         results.push({ number, status: "sent", id: data.messages?.[0]?.id });
       } else {
-        results.push({ number, status: "failed", error: data.error?.message || "Unknown error" });
+        const e = data.error || {};
+        // Meta puts the precise reason (e.g. which parameter/format) in error_data.details
+        const detail = e.error_data?.details || e.message || "Unknown error";
+        console.error("WhatsApp send failed", number, JSON.stringify(e));
+        results.push({ number, status: "failed", error: `[${e.code ?? "?"}] ${detail}` });
       }
     } catch (err) {
       results.push({ number, status: "failed", error: err.message });
