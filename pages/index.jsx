@@ -685,7 +685,7 @@ export default function App() {
   const [acctData,setAcctData]=useState(null); const [acctSheet,setAcctSheet]=useState(""); const [acctIssues,setAcctIssues]=useState([]);
   const [posData,setPosData]=useState(null); const [bankTxns,setBankTxns]=useState(null);
   const [rec,setRec]=useState(null); const [tab,setTab]=useState("overview");
-  const [aiReport,setAiReport]=useState(""); const [aiLoad,setAiLoad]=useState(false);
+  const [aiReport,setAiReport]=useState(""); const [aiLoad,setAiLoad]=useState(false); const [aiError,setAiError]=useState("");
   const [approved,setApproved]=useState(false);
   const [pdfMode,setPdfMode]=useState(false);
   const [pdfHtml,setPdfHtml]=useState("");
@@ -766,7 +766,7 @@ export default function App() {
 
   const analyse=async()=>{
     const r=reconcile(acctData,posData);
-    setRec(r);setTab("overview");setAiReport("");setApproved(false);
+    setRec(r);setTab("overview");setAiReport("");setApproved(false);setAiError("");
     setAiLoad(true);
     const deb=bankTxns?bankTxns.filter(t=>t.type==="debit"):[];
     const cred=bankTxns?bankTxns.filter(t=>t.type==="credit"):[];
@@ -849,8 +849,9 @@ Numbered list of issues requiring attention.`;
     try{
       const res=await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt})});
       const d=await res.json();
-      setAiReport(d.text||d.error||"Could not generate report.");
-    }catch(e){setAiReport("Error: "+e.message);}
+      if(res.ok && d.text){ setAiReport(d.text); setAiError(""); }
+      else { setAiReport(""); setAiError(d.error||"Could not generate report. Please try again."); }
+    }catch(e){ setAiReport(""); setAiError("Network error: "+e.message); }
     setAiLoad(false);
   };
 
@@ -1518,6 +1519,13 @@ Numbered list of issues requiring attention.`;
             {aiLoad?<div style={{textAlign:"center",padding:32,color:B.txtM}}>
               <span style={{display:"inline-block",width:16,height:16,border:`2px solid ${B.gold}`,borderTopColor:B.forest,borderRadius:"50%",animation:"spin .8s linear infinite",marginRight:10,verticalAlign:"middle"}}/>
               Writing your monthly owner report...
+            </div>:aiError?<div style={{padding:24}}>
+              <div style={{background:B.sRedBg,border:`1px solid ${B.sRedBd}`,borderRadius:6,padding:"14px 16px",color:B.sRed,fontSize:13,marginBottom:16}}>
+                <strong style={{fontFamily:"Montserrat,sans-serif",letterSpacing:".05em"}}>Report not generated.</strong><br/>{aiError}
+              </div>
+              <div style={{textAlign:"center"}}>
+                <button onClick={analyse} disabled={!canRun} style={{background:B.forest,color:B.white,border:`2px solid ${B.gold}`,padding:"10px 24px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:canRun?"pointer":"not-allowed",borderRadius:4,fontWeight:700}}>↻ Retry Generation</button>
+              </div>
             </div>:aiReport?<>
               <div style={{marginBottom:20}}>{renderMD(aiReport)}</div>
               <div style={{borderTop:`1px solid ${B.bordL}`,paddingTop:16}}>
