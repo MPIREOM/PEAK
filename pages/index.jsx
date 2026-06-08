@@ -297,75 +297,64 @@ function generatePDF(aiReport, rec, posData, bankTxns, acctSheet, acctIssues, ba
   return html;
 }
 
-// Build a compact, branded PDF of the owner report and return base64 (no data-URI prefix).
-// Used as the document attachment for the WhatsApp template header.
-async function buildOwnerReportPdfBase64({ acctSheet, rec, posData, totExp, profit, acctIssues }) {
-  const { jsPDF } = await import("jspdf");
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
-  const PW = 210, M = 16;
-  let y = 46;
+// Render the full owner-report HTML (the exact same document used by "View PDF")
+// into a multi-page A4 PDF and return base64 (no data-URI prefix). Used as the
+// document attachment for the WhatsApp template header so the owners receive the
+// complete report, identical to View PDF.
+async function htmlToPdfBase64(html) {
+  const [{ jsPDF }, h2cMod] = await Promise.all([import("jspdf"), import("html2canvas")]);
+  const html2canvas = h2cMod.default || h2cMod;
 
-  // Header band
-  doc.setFillColor(B.forest); doc.rect(0, 0, PW, 34, "F");
-  doc.setTextColor(B.gold); doc.setFont("helvetica", "bold"); doc.setFontSize(22);
-  doc.text("THE PEAK", M, 18);
-  doc.setTextColor(B.white); doc.setFont("helvetica", "normal"); doc.setFontSize(11);
-  doc.text(`Monthly Owner Report — ${acctSheet || ""}`, M, 27);
+  // A4 at 96dpi ≈ 794px wide. Render offscreen so layout matches the print view.
+  const A4_W = 794;
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = `position:fixed;left:-10000px;top:0;width:${A4_W}px;height:1123px;border:0;`;
+  document.body.appendChild(iframe);
 
-  const pageGuard = (need = 10) => { if (y + need > 285) { doc.addPage(); y = 22; } };
-  const sectionTitle = (t) => {
-    pageGuard(16);
-    doc.setFillColor(B.cream); doc.rect(M, y - 6, PW - 2 * M, 9, "F");
-    doc.setTextColor(B.forest); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
-    doc.text(t, M + 3, y); y += 12;
-  };
-  const row = (label, value, color = B.txtD) => {
-    pageGuard();
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(B.txtM);
-    doc.text(String(label), M + 3, y);
-    doc.setFont("helvetica", "bold"); doc.setTextColor(color);
-    doc.text(String(value), PW - M - 3, y, { align: "right" }); y += 7;
-  };
+  try {
+    const idoc = iframe.contentDocument || iframe.contentWindow.document;
+    idoc.open();
+    // Strip the auto-print script so the hidden iframe doesn't open a print dialog.
+    idoc.write(html.replace(/<script[\s\S]*?<\/script>/gi, ""));
+    idoc.close();
 
-  sectionTitle("SALES SUMMARY");
-  row("Accountant Total", f(rec.acctTotal) + " OMR");
-  row("POS Total", f(posData.summary.totalSales) + " OMR");
-  row("Net Sales", f(rec.acctNet) + " OMR");
-  row("Variance", (rec.salesVar >= 0 ? "+" : "") + f(rec.salesVar) + " OMR", rec.salesVar >= 0 ? B.sGreen : B.sRed);
-  y += 4;
+    // Wait for layout, web fonts and images to settle before capturing.
+    await new Promise((r) => (idoc.readyState === "complete" ? r() : (iframe.onload = r)));
+    if (idoc.fonts?.ready) { try { await idoc.fonts.ready; } catch {} }
+    await new Promise((r) => setTimeout(r, 400));
 
-  sectionTitle("EXPENSES & PROFIT");
-  row("Total Expenses", totExp > 0 ? f(totExp) + " OMR" : "Not provided");
-  row("Estimated Profit", profit);
-  y += 4;
-
-  sectionTitle("TOP MENU ITEMS");
-  (posData.menuItems || []).slice(0, 5).forEach((it, i) => {
-    pageGuard();
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(B.txtD);
-    doc.text(`${i + 1}. ${it.name}`, M + 3, y);
-    doc.setFont("helvetica", "bold"); doc.setTextColor(B.forest);
-    doc.text(`${it.qty} sold · ${f(it.amount)} OMR`, PW - M - 3, y, { align: "right" }); y += 7;
-  });
-  y += 4;
-
-  sectionTitle("FLAGS & ACTION ITEMS");
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(B.sYell);
-  if (acctIssues && acctIssues.length) {
-    acctIssues.forEach((it, i) => {
-      const txt = `${i + 1}. ${it.issue}${it.date ? "  (" + it.date + ")" : ""}`;
-      const lines = doc.splitTextToSize(txt, PW - 2 * M - 6);
-      pageGuard(lines.length * 6 + 1);
-      doc.text(lines, M + 3, y); y += lines.length * 6 + 1;
+    const canvas = await html2canvas(idoc.body, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      windowWidth: A4_W,
+      width: A4_W,
+      height: idoc.body.scrollHeight,
+      scrollX: 0,
+      scrollY: 0,
     });
-  } else {
-    doc.text("No issues found.", M + 3, y); y += 7;
+
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const imgWmm = 210;
+    const pxPerMm = canvas.width / imgWmm;
+    const pageHpx = Math.floor(297 * pxPerMm);
+    let rendered = 0, page = 0;
+    while (rendered < canvas.height) {
+      const sliceH = Math.min(pageHpx, canvas.height - rendered);
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width;
+      slice.height = sliceH;
+      slice.getContext("2d").drawImage(canvas, 0, rendered, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+      if (page > 0) doc.addPage();
+      doc.addImage(slice.toDataURL("image/jpeg", 0.78), "JPEG", 0, 0, imgWmm, sliceH / pxPerMm);
+      rendered += sliceH;
+      page++;
+    }
+
+    return doc.output("datauristring").split(",")[1];
+  } finally {
+    document.body.removeChild(iframe);
   }
-
-  doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(B.txtDim);
-  doc.text("The Peak Coffee Shop — Monthly Report", M, 290);
-
-  return doc.output("datauristring").split(",")[1];
 }
 
 // ── BEANS ANALYSIS ───────────────────────────────────────────────────
@@ -894,7 +883,9 @@ Numbered list of issues requiring attention.`;
 
     let pdfBase64;
     try {
-      pdfBase64 = await buildOwnerReportPdfBase64({ acctSheet, rec, posData, totExp: totExp2, profit, acctIssues });
+      // Same HTML as the "View PDF" button → owners receive the full report.
+      const html = generatePDF(aiReport, rec, posData, bankTxns, acctSheet, acctIssues, baristaData);
+      pdfBase64 = await htmlToPdfBase64(html);
     } catch(e) {
       setWaError("Could not generate the report PDF: "+e.message);
       setWaSending(false);
