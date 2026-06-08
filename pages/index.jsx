@@ -297,6 +297,77 @@ function generatePDF(aiReport, rec, posData, bankTxns, acctSheet, acctIssues, ba
   return html;
 }
 
+// Build a compact, branded PDF of the owner report and return base64 (no data-URI prefix).
+// Used as the document attachment for the WhatsApp template header.
+async function buildOwnerReportPdfBase64({ acctSheet, rec, posData, totExp, profit, acctIssues }) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const PW = 210, M = 16;
+  let y = 46;
+
+  // Header band
+  doc.setFillColor(B.forest); doc.rect(0, 0, PW, 34, "F");
+  doc.setTextColor(B.gold); doc.setFont("helvetica", "bold"); doc.setFontSize(22);
+  doc.text("THE PEAK", M, 18);
+  doc.setTextColor(B.white); doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+  doc.text(`Monthly Owner Report — ${acctSheet || ""}`, M, 27);
+
+  const pageGuard = (need = 10) => { if (y + need > 285) { doc.addPage(); y = 22; } };
+  const sectionTitle = (t) => {
+    pageGuard(16);
+    doc.setFillColor(B.cream); doc.rect(M, y - 6, PW - 2 * M, 9, "F");
+    doc.setTextColor(B.forest); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
+    doc.text(t, M + 3, y); y += 12;
+  };
+  const row = (label, value, color = B.txtD) => {
+    pageGuard();
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(B.txtM);
+    doc.text(String(label), M + 3, y);
+    doc.setFont("helvetica", "bold"); doc.setTextColor(color);
+    doc.text(String(value), PW - M - 3, y, { align: "right" }); y += 7;
+  };
+
+  sectionTitle("SALES SUMMARY");
+  row("Accountant Total", f(rec.acctTotal) + " OMR");
+  row("POS Total", f(posData.summary.totalSales) + " OMR");
+  row("Net Sales", f(rec.acctNet) + " OMR");
+  row("Variance", (rec.salesVar >= 0 ? "+" : "") + f(rec.salesVar) + " OMR", rec.salesVar >= 0 ? B.sGreen : B.sRed);
+  y += 4;
+
+  sectionTitle("EXPENSES & PROFIT");
+  row("Total Expenses", totExp > 0 ? f(totExp) + " OMR" : "Not provided");
+  row("Estimated Profit", profit);
+  y += 4;
+
+  sectionTitle("TOP MENU ITEMS");
+  (posData.menuItems || []).slice(0, 5).forEach((it, i) => {
+    pageGuard();
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(B.txtD);
+    doc.text(`${i + 1}. ${it.name}`, M + 3, y);
+    doc.setFont("helvetica", "bold"); doc.setTextColor(B.forest);
+    doc.text(`${it.qty} sold · ${f(it.amount)} OMR`, PW - M - 3, y, { align: "right" }); y += 7;
+  });
+  y += 4;
+
+  sectionTitle("FLAGS & ACTION ITEMS");
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(B.sYell);
+  if (acctIssues && acctIssues.length) {
+    acctIssues.forEach((it, i) => {
+      const txt = `${i + 1}. ${it.issue}${it.date ? "  (" + it.date + ")" : ""}`;
+      const lines = doc.splitTextToSize(txt, PW - 2 * M - 6);
+      pageGuard(lines.length * 6 + 1);
+      doc.text(lines, M + 3, y); y += lines.length * 6 + 1;
+    });
+  } else {
+    doc.text("No issues found.", M + 3, y); y += 7;
+  }
+
+  doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(B.txtDim);
+  doc.text("The Peak Coffee Shop — Monthly Report", M, 290);
+
+  return doc.output("datauristring").split(",")[1];
+}
+
 // ── BEANS ANALYSIS ───────────────────────────────────────────────────
 // Coffee drink categories from POS — all categories that consume beans
 // POS categories that contain coffee-bean drinks
@@ -821,11 +892,21 @@ Numbered list of issues requiring attention.`;
       flags,
     ];
 
+    let pdfBase64;
+    try {
+      pdfBase64 = await buildOwnerReportPdfBase64({ acctSheet, rec, posData, totExp: totExp2, profit, acctIssues });
+    } catch(e) {
+      setWaError("Could not generate the report PDF: "+e.message);
+      setWaSending(false);
+      return;
+    }
+    const filename = (`The Peak - ${acctSheet||"Monthly Report"}.pdf`).replace(/[^\w.\- ]/g,"");
+
     try {
       const res = await fetch("/api/whatsapp", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({variables}),
+        body:JSON.stringify({variables, pdfBase64, filename}),
       });
       const d = await res.json();
       const sent = d.results?.filter(r=>r.status==="sent").map(r=>r.number)||[];
