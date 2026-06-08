@@ -39,7 +39,12 @@ export default async function handler(req, res) {
               components: [
                 {
                   type: "body",
-                  parameters: variables.map((v) => ({ type: "text", text: String(v) })),
+                  // Meta rejects body params containing newlines, tabs, or 4+ consecutive
+                  // spaces with error #132012, so collapse all whitespace to single spaces.
+                  parameters: variables.map((v) => ({
+                    type: "text",
+                    text: String(v).replace(/\s+/g, " ").trim() || "-",
+                  })),
                 },
               ],
             },
