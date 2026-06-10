@@ -171,7 +171,9 @@ describe("generatePDF", () => {
   it("renders all new data-representation sections", () => {
     expect(html).toContain("Profit Margin");
     expect(html).toContain("Avg / Receipt");
-    expect(html).toContain("May Sales — Year on Year");
+    expect(html).toContain("Monthly Sales — Year on Year");
+    expect(html).toContain("<svg");
+    expect(html).toContain("2026 (this year)");
     expect(html).toContain("Revenue by Category");
     expect(html).toContain("Payment Mix");
     expect(html).toContain("Expenses by Category");
