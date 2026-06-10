@@ -2,10 +2,18 @@
 // Server-side Anthropic API call — API key never exposed to browser.
 // Retries automatically on transient overload / rate-limit errors (429, 529, 500/503).
 
+import { checkAuth } from "../../lib/auth";
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Default model; override with ANTHROPIC_MODEL without touching code.
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  const auth = checkAuth(req);
+  if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "No prompt provided" });
@@ -29,7 +37,7 @@ export default async function handler(req, res) {
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
+          model: MODEL,
           max_tokens: 2500,
           messages: [{ role: "user", content: prompt }],
         }),

@@ -1,5 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import * as XLSX from "xlsx";
+import { f } from "../lib/format";
+import { HISTORICAL_SALES, MONTH_NAMES, YEARS, YEAR_COLORS, deriveMonthYear, yoy } from "../lib/sales";
+import { parseAcct, parsePOS, parseBank, parseBarista, reconcile } from "../lib/parsers";
+import { calcBeans, GRAMS_PER_DRINK } from "../lib/beans";
+import { generatePDF, htmlToPdfBase64 } from "../lib/pdf";
 
 // Brand colors
 const B = {
@@ -10,410 +14,6 @@ const B = {
   sRed:"#c0392b",   sRedBg:"#fdf0ee",   sRedBd:"#e8c4be",
   sYell:"#8a6518",  sYellBg:"#fef8ec",  sYellBd:"#e8d8a0",
 };
-
-// ── HISTORICAL SALES DATA (2021–2026) ────────────────────────────────
-const HISTORICAL_SALES = {
-  2021: {9:1577.7, 10:789.25, 11:876.3, 12:969.4},
-  2022: {1:798.58, 2:663.28, 3:927.2, 4:551.08, 5:2049.0, 6:1749.16, 7:3467.01, 8:2129.61, 9:1245.36, 10:1179.63, 11:1213.54, 12:1495.69},
-  2023: {1:1168.48, 2:1081.7, 3:1084.23, 4:1276.97, 5:1196.09, 6:2318.01, 7:2184.83, 8:1791.34, 9:1281.66, 10:880.18, 11:1379.31, 12:1226.7},
-  2024: {1:898.02, 2:821.75, 3:401.8, 4:1264.22, 5:1363.5, 6:2460.7, 7:2068.61, 8:1681.14, 9:1108.34, 10:891.44, 11:1173.94, 12:927.5},
-  2025: {1:743.18, 2:752.2, 3:606.44, 4:2025.73, 5:1417.58, 6:2460.01, 7:2281.3, 8:2036.56, 9:1357.93, 10:1328.76, 11:1976.71, 12:1575.02},
-  2026: {1:2043.34, 2:1372.7, 3:1427.78},
-};
-const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const YEARS = [2022,2023,2024,2025,2026];
-const YEAR_COLORS = ["#1a8080","#c8952a","#1a3d4f","#2d6e4e","#1e3d2f"];
-
-// Helpers
-const n = v => { if(!v&&v!==0) return 0; const x=parseFloat(String(v).replace(/[^0-9.\-]/g,"")); return isNaN(x)?0:x; };
-const f = v => n(v).toFixed(3);
-const excelDate = v => {
-  if(!v) return null;
-  if(v instanceof Date) return v.toISOString().split("T")[0];
-  if(typeof v==="number"&&v>40000) return new Date(Date.UTC(1899,11,30)+v*86400000).toISOString().split("T")[0];
-  const s=String(v).trim();
-  const iso=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const dmy=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/); if(dmy) return `${dmy[3]}-${dmy[2].padStart(2,"0")}-${dmy[1].padStart(2,"0")}`;
-  return null;
-};
-
-// ── PDF GENERATOR ────────────────────────────────────────────────────
-function generatePDF(aiReport, rec, posData, bankTxns, acctSheet, acctIssues, baristaData) {
-  const deb = bankTxns ? bankTxns.filter(t=>t.type==="debit") : [];
-  const totExp = deb.reduce((s,t)=>s+t.amount, 0);
-  const profit = totExp > 0 ? (rec.acctNet - totExp).toFixed(3) : null;
-  const top5 = posData.menuItems.slice(0,5);
-
-  // YoY from historical
-  const MONS = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
-  const mo = acctSheet ? MONS.findIndex(m=>acctSheet.toUpperCase().includes(m))+1 : null;
-  const yrM = acctSheet ? acctSheet.match(/20(\d{2})/) : null;
-  const yr = yrM ? parseInt("20"+yrM[1]) : new Date().getFullYear();
-  const prevSales = mo ? (HISTORICAL_SALES[yr-1]?.[mo]||null) : null;
-  const currSales = posData.summary.totalSales;
-  const growth = prevSales ? parseFloat(((currSales-prevSales)/prevSales*100).toFixed(1)) : null;
-
-  // Format the AI report text as HTML
-  const mdToHtml = (text) => {
-    if(!text) return "";
-    return text.split("\n").map(line => {
-      if(line.startsWith("### ")) return `<h3>${line.slice(4)}</h3>`;
-      if(line.startsWith("## "))  return `<h2>${line.slice(3)}</h2>`;
-      if(line.startsWith("# "))   return `<h1>${line.slice(2)}</h1>`;
-      if(line.trim()==="---")     return `<hr/>`;
-      if(line.trim()==="")        return `<br/>`;
-      if(line.startsWith("- ")||line.startsWith("• ")) return `<li>${line.slice(2).replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")}</li>`;
-      const numMatch = line.match(/^(\d+)\.\s+(.+)/);
-      if(numMatch) return `<li class="num"><span class="num-marker">${numMatch[1]}.</span>${numMatch[2].replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")}</li>`;
-      return `<p>${line.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>")}</p>`;
-    }).join("\n");
-  };
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8"/>
-<title>The Peak — ${acctSheet} Owner Report</title>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet"/>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:'Source Sans 3',sans-serif;font-size:13px;color:#1a1a16;background:#fff;line-height:1.6}
-  @page{size:A4;margin:0}
-  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-
-  /* Header */
-  .header{background:#1e3d2f;padding:0;page-break-inside:avoid}
-  .header-bar{height:5px;background:linear-gradient(90deg,#c8952a,#e4b44a,#c8952a)}
-  .header-inner{padding:24px 36px;display:flex;justify-content:space-between;align-items:center}
-  .header-left .shop{font-size:10px;letter-spacing:.4em;color:#e4b44a;text-transform:uppercase;font-family:Montserrat,sans-serif;font-weight:600;margin-bottom:5px}
-  .header-left h1{font-size:26px;font-weight:800;color:#fff;font-family:Montserrat,sans-serif}
-  .header-left .sub{font-size:11px;color:rgba(255,255,255,.5);margin-top:3px}
-  .header-right{text-align:right;color:#e4b44a;font-family:Montserrat,sans-serif;font-weight:700;font-size:14px;letter-spacing:.06em}
-
-  /* Body */
-  .body{padding:28px 36px}
-
-  /* Stats row */
-  .stats-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px}
-  .stat{border:1px solid #d0c8b8;border-top:3px solid #c8952a;border-radius:6px;padding:12px 8px;text-align:center;page-break-inside:avoid}
-  .stat .val{font-size:16px;font-weight:700;color:#1e3d2f;font-family:Montserrat,sans-serif;margin-bottom:2px}
-  .stat .sub{font-size:10px;color:#7a6e5e;margin-bottom:2px}
-  .stat .lbl{font-size:8px;color:#7a6e5e;letter-spacing:.1em;text-transform:uppercase;font-family:Montserrat,sans-serif;font-weight:600}
-
-  /* YoY banner */
-  .yoy{background:#e8f4ed;border:2px solid #b8d8c4;border-radius:8px;padding:16px 20px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;page-break-inside:avoid}
-  .yoy-left .label{font-size:9px;letter-spacing:.25em;color:#2d6e4e;text-transform:uppercase;font-family:Montserrat,sans-serif;font-weight:700;margin-bottom:4px}
-  .yoy-left .growth{font-size:20px;font-weight:800;color:#2d6e4e;font-family:Montserrat,sans-serif}
-  .yoy-boxes{display:flex;gap:10px;align-items:center}
-  .yoy-box{background:#fff;border-radius:6px;padding:10px 16px;text-align:center;min-width:100px;border:1px solid #d0c8b8}
-  .yoy-box.curr{border:2px solid #2d6e4e}
-  .yoy-box .yr{font-size:9px;color:#7a6e5e;letter-spacing:.1em;text-transform:uppercase;font-family:Montserrat,sans-serif;font-weight:600;margin-bottom:3px}
-  .yoy-box .amount{font-size:17px;font-weight:700;color:#1e3d2f;font-family:Montserrat,sans-serif}
-  .yoy-box.curr .amount{color:#2d6e4e}
-  .yoy-box .omr{font-size:10px;color:#7a6e5e}
-  .arrow{font-size:18px;color:#7a6e5e}
-
-  /* Section card */
-  .card{border:1px solid #d0c8b8;border-radius:8px;padding:18px;margin-bottom:16px;page-break-inside:avoid}
-  .card-title{font-size:9px;letter-spacing:.3em;color:#1e3d2f;text-transform:uppercase;font-family:Montserrat,sans-serif;font-weight:700;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #c8952a}
-
-  /* Table */
-  table{width:100%;border-collapse:collapse;margin-bottom:0}
-  th{font-size:8px;letter-spacing:.12em;color:#1e3d2f;text-transform:uppercase;padding:8px 10px;font-weight:700;border-bottom:2px solid #c8952a;background:#ede8df;font-family:Montserrat,sans-serif;text-align:right}
-  th.l{text-align:left}
-  td{padding:7px 10px;font-size:12px;border-bottom:1px solid #e4ddd1;text-align:right;color:#1a1a16}
-  td.l{text-align:left}
-  tfoot td{font-weight:700;font-family:Montserrat,sans-serif;color:#1e3d2f;border-top:2px solid #c8952a;border-bottom:none;background:#ede8df}
-
-  /* Report text */
-  .report-body h1{font-size:18px;font-weight:800;color:#1e3d2f;font-family:Montserrat,sans-serif;margin:16px 0 8px}
-  .report-body h2{font-size:15px;font-weight:700;color:#1e3d2f;font-family:Montserrat,sans-serif;margin:14px 0 6px}
-  .report-body h3{font-size:10px;letter-spacing:.25em;color:#1e3d2f;text-transform:uppercase;font-family:Montserrat,sans-serif;font-weight:700;margin:20px 0 10px;padding-bottom:6px;border-bottom:2px solid #c8952a}
-  .report-body p{font-size:13px;color:#1a1a16;line-height:1.85;margin-bottom:6px}
-  .report-body li{font-size:13px;color:#1a1a16;line-height:1.75;margin-bottom:3px;padding-left:16px;list-style:none;position:relative}
-  .report-body li::before{content:"•";color:#c8952a;font-weight:700;position:absolute;left:0}
-  .report-body li.num::before{content:""}
-  .report-body li .num-marker{color:#c8952a;font-weight:700;font-family:Montserrat,sans-serif;margin-right:6px}
-  .report-body strong{font-weight:700;color:#1e3d2f;font-family:Montserrat,sans-serif}
-  .report-body hr{border:none;border-top:1px solid #d0c8b8;margin:12px 0}
-  .report-body br{display:block;margin:4px 0}
-
-  /* Tag */
-  .tag{display:inline-block;padding:2px 8px;border-radius:12px;font-size:9px;font-family:Montserrat,sans-serif;font-weight:700}
-  .tag-ok{background:#e8f4ed;color:#2d6e4e;border:1px solid #b8d8c4}
-  .tag-warn{background:#fef8ec;color:#8a6518;border:1px solid #e8d8a0}
-  .tag-bad{background:#fdf0ee;color:#c0392b;border:1px solid #e8c4be}
-
-  /* Footer */
-  .footer{margin-top:24px;padding-top:12px;border-top:2px solid #d0c8b8;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#a89e8e}
-  .footer .brand{font-family:Montserrat,sans-serif;font-weight:700;color:#1e3d2f}
-
-  /* Page break helpers */
-  .page-break{page-break-before:always}
-  .no-break{page-break-inside:avoid}
-</style>
-</head>
-<body>
-
-<div class="header">
-  <div class="header-bar"></div>
-  <div class="header-inner">
-    <div class="header-left">
-      <div class="shop">The Peak Coffee Shop</div>
-      <h1>Monthly Owner Report</h1>
-      <div class="sub">Confidential — For Owners Only</div>
-    </div>
-    <div class="header-right">
-      <svg width="60" height="30" viewBox="0 0 72 36" fill="none"><path d="M4 28 Q14 8 22 20 Q30 32 40 14 Q50 2 58 16 Q64 26 68 24" stroke="#e4b44a" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.75"/></svg>
-      <div>${acctSheet}</div>
-      <div style="font-size:10px;color:rgba(255,255,255,.4);font-weight:400;margin-top:2px">Generated ${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</div>
-    </div>
-  </div>
-</div>
-
-<div class="body">
-
-  <!-- YoY Banner -->
-  ${growth!==null?`
-  <div class="yoy">
-    <div class="yoy-left">
-      <div class="label">Year-on-Year Sales Comparison</div>
-      <div class="growth">${growth>=0?"▲":"▼"} ${growth}% growth vs same month last year</div>
-    </div>
-    <div class="yoy-boxes">
-      <div class="yoy-box">
-        <div class="yr">${yr-1}</div>
-        <div class="amount">${prevSales.toFixed(2)}</div>
-        <div class="omr">OMR</div>
-      </div>
-      <div class="arrow">→</div>
-      <div class="yoy-box curr">
-        <div class="yr">${yr}</div>
-        <div class="amount">${currSales.toFixed(2)}</div>
-        <div class="omr">OMR</div>
-      </div>
-    </div>
-  </div>`:""}
-
-  <!-- Key Stats -->
-  <div class="stats-row">
-    <div class="stat"><div class="val">${(rec.acctTotal).toFixed(3)}</div><div class="sub">OMR</div><div class="lbl">Accountant Total</div></div>
-    <div class="stat"><div class="val">${currSales.toFixed(3)}</div><div class="sub">OMR</div><div class="lbl">POS Total</div></div>
-    <div class="stat"><div class="val">${(rec.acctNet).toFixed(3)}</div><div class="sub">OMR</div><div class="lbl">Net Sales</div></div>
-    <div class="stat" style="border-top-color:#8a6518"><div class="val" style="color:#8a6518">${(rec.acctPurchase).toFixed(3)}</div><div class="sub">OMR</div><div class="lbl">Purchases</div></div>
-    <div class="stat" style="border-top-color:${profit?'#2d6e4e':'#a89e8e'}"><div class="val" style="color:${profit?'#2d6e4e':'#a89e8e'}">${profit||"N/A"}</div><div class="sub">${profit?"OMR":""}</div><div class="lbl">Est. Profit</div></div>
-  </div>
-
-  <!-- Reconciliation Table -->
-  <div class="card no-break">
-    <div class="card-title">⚖ Sales Reconciliation — Accountant vs POS</div>
-    <table>
-      <thead><tr><th class="l">Metric</th><th>Accountant (OMR)</th><th>POS (OMR)</th><th>Variance</th><th>Status</th></tr></thead>
-      <tbody>
-        ${[
-          ["Total Sales", rec.acctTotal, currSales, rec.salesVar],
-          ["Cash", rec.acctCash, posData.summary.cash, rec.cashVar],
-          ["Card", rec.acctCard, posData.summary.card, rec.cardVar],
-        ].map(([lbl,a,p,v])=>`
-        <tr>
-          <td class="l">${lbl}</td>
-          <td>${a.toFixed(3)}</td>
-          <td>${p.toFixed(3)}</td>
-          <td style="color:${Math.abs(v)>10?'#c0392b':Math.abs(v)>2?'#8a6518':'#7a6e5e'};font-weight:${Math.abs(v)>2?700:400}">${v>=0?"+":""}${v.toFixed(3)}</td>
-          <td><span class="tag ${Math.abs(v)>10?'tag-bad':Math.abs(v)>2?'tag-warn':'tag-ok'}">${Math.abs(v)>10?"⚠ Flag":Math.abs(v)>2?"△ Minor":"✓ Clear"}</span></td>
-        </tr>`).join("")}
-        <tr style="opacity:.6"><td class="l">Net Sales <small>(POS is gross)</small></td><td>${rec.acctNet.toFixed(3)}</td><td>${posData.summary.netSales.toFixed(3)}</td><td>—</td><td>—</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- Expenses Table -->
-  ${deb.length>0?`
-  <div class="card no-break">
-    <div class="card-title">💸 Expenses (Bank Debits)</div>
-    <table>
-      <thead><tr><th class="l">Date</th><th class="l">Description</th><th>Amount (OMR)</th></tr></thead>
-      <tbody>${deb.map(t=>`<tr><td class="l">${t.date}</td><td class="l">${t.desc}</td><td style="color:#c0392b;font-weight:600">${t.amount.toFixed(3)}</td></tr>`).join("")}</tbody>
-      <tfoot><tr><td class="l" colspan="2">TOTAL EXPENSES</td><td style="color:#c0392b">${totExp.toFixed(3)}</td></tr></tfoot>
-    </table>
-  </div>`:""}
-
-  <!-- Top Menu Items -->
-  <div class="card no-break">
-    <div class="card-title">☕ Top Menu Items by Revenue</div>
-    <table>
-      <thead><tr><th class="l">Rank</th><th class="l">Item</th><th>Qty Sold</th><th>Revenue (OMR)</th><th>% of Sales</th></tr></thead>
-      <tbody>${top5.map((item,i)=>`
-        <tr style="background:${i<3?'rgba(200,149,42,.05)':'transparent'}">
-          <td class="l" style="font-family:Montserrat,sans-serif;font-weight:700;color:#c8952a">${i<3?["🥇","🥈","🥉"][i]:"#"+(i+1)}</td>
-          <td class="l" style="font-weight:${i<3?700:400}">${item.name}</td>
-          <td>${item.qty}</td>
-          <td style="font-weight:${i<3?700:400};color:${i<3?'#1e3d2f':'#1a1a16'}">${item.amount.toFixed(3)}</td>
-          <td>${((item.amount/currSales)*100).toFixed(1)}%</td>
-        </tr>`).join("")}
-      </tbody>
-    </table>
-  </div>
-
-  <!-- Spoilage if available -->
-  ${baristaData?.spoilage?.length?`
-  <div class="card no-break">
-    <div class="card-title">⚠️ Spoilage Report</div>
-    <table>
-      <thead><tr><th class="l">Item</th><th>Qty</th></tr></thead>
-      <tbody>${baristaData.spoilage.map(r=>`<tr><td class="l" style="color:#c0392b">${r.item}</td><td style="color:#c0392b;font-weight:700">${r.qty}</td></tr>`).join("")}</tbody>
-    </table>
-  </div>`:""}
-
-  <!-- Data Issues -->
-  ${acctIssues.length?`
-  <div class="card no-break" style="border-color:#e8d8a0;border-left:4px solid #c8952a">
-    <div class="card-title" style="color:#8a6518">△ Data Issues in Accountant File</div>
-    ${acctIssues.map(i=>`<p style="color:#8a6518;margin-bottom:4px">• ${i.date}: ${i.issue}</p>`).join("")}
-  </div>`:""}
-
-  <!-- Page break before AI report -->
-  <div class="page-break"></div>
-
-  <!-- AI Report -->
-  <div class="card">
-    <div class="card-title">📋 Full Analysis</div>
-    <div class="report-body">${mdToHtml(aiReport)}</div>
-  </div>
-
-  <!-- Footer -->
-  <div class="footer">
-    <div><span class="brand">The Peak Coffee Shop</span> — Monthly Owner Report</div>
-    <div>${acctSheet} • Generated ${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</div>
-  </div>
-
-</div>
-
-<script>window.onload=()=>window.print();</script>
-</body>
-</html>`;
-
-  // Return the built HTML so the component can switch into PDF view
-  return html;
-}
-
-// Render the full owner-report HTML (the exact same document used by "View PDF")
-// into a multi-page A4 PDF and return base64 (no data-URI prefix). Used as the
-// document attachment for the WhatsApp template header so the owners receive the
-// complete report, identical to View PDF.
-async function htmlToPdfBase64(html) {
-  const [{ jsPDF }, h2cMod] = await Promise.all([import("jspdf"), import("html2canvas")]);
-  const html2canvas = h2cMod.default || h2cMod;
-
-  // A4 at 96dpi ≈ 794px wide. Render offscreen so layout matches the print view.
-  const A4_W = 794;
-  const iframe = document.createElement("iframe");
-  iframe.style.cssText = `position:fixed;left:-10000px;top:0;width:${A4_W}px;height:1123px;border:0;`;
-  document.body.appendChild(iframe);
-
-  try {
-    const idoc = iframe.contentDocument || iframe.contentWindow.document;
-    idoc.open();
-    // Strip the auto-print script so the hidden iframe doesn't open a print dialog.
-    idoc.write(html.replace(/<script[\s\S]*?<\/script>/gi, ""));
-    idoc.close();
-
-    // Wait for layout, web fonts and images to settle before capturing.
-    await new Promise((r) => (idoc.readyState === "complete" ? r() : (iframe.onload = r)));
-    if (idoc.fonts?.ready) { try { await idoc.fonts.ready; } catch {} }
-    await new Promise((r) => setTimeout(r, 400));
-
-    const canvas = await html2canvas(idoc.body, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: "#ffffff",
-      windowWidth: A4_W,
-      width: A4_W,
-      height: idoc.body.scrollHeight,
-      scrollX: 0,
-      scrollY: 0,
-    });
-
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
-    const imgWmm = 210;
-    const pxPerMm = canvas.width / imgWmm;
-    const pageHpx = Math.floor(297 * pxPerMm);
-    let rendered = 0, page = 0;
-    while (rendered < canvas.height) {
-      const sliceH = Math.min(pageHpx, canvas.height - rendered);
-      const slice = document.createElement("canvas");
-      slice.width = canvas.width;
-      slice.height = sliceH;
-      slice.getContext("2d").drawImage(canvas, 0, rendered, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
-      if (page > 0) doc.addPage();
-      doc.addImage(slice.toDataURL("image/jpeg", 0.78), "JPEG", 0, 0, imgWmm, sliceH / pxPerMm);
-      rendered += sliceH;
-      page++;
-    }
-
-    return doc.output("datauristring").split(",")[1];
-  } finally {
-    document.body.removeChild(iframe);
-  }
-}
-
-// ── BEANS ANALYSIS ───────────────────────────────────────────────────
-// Coffee drink categories from POS — all categories that consume beans
-// POS categories that contain coffee-bean drinks
-// HOT DRINKS = Carbonic V60 (coffee) | COLD DRINKS = Iced rose/saffron latte (coffee)
-// Excluded from bean calc: Matcha Latte, Rose Foam Matcha, Fresh Milk (no beans)
-const COFFEE_CATEGORIES = ["HOT COFFEE","COLD COFFEE","HOT DRINKS","COLD DRINKS"];
-const NON_COFFEE_ITEMS = ["MATCHA","FRESH MILK","ROSE FOAM","HOT CHOCOLATE","TEA","CHAI"];
-const GRAMS_PER_DRINK = 20; // 20g per drink
-
-function calcBeans(posData, baristaData) {
-  if(!posData) return null;
-
-  // Count all coffee drinks sold from POS categories
-  // Use categories for the broad count (POS only gives category totals)
-  const coffeeCategories = posData.categories.filter(c =>
-    COFFEE_CATEGORIES.includes(c.name.toUpperCase())
-  );
-  // Also subtract non-coffee items that appear in those categories (from menu items)
-  const nonCoffeeQty = posData.menuItems
-    .filter(item => NON_COFFEE_ITEMS.some(nc => item.name.toUpperCase().includes(nc)))
-    .reduce((s, item) => s + item.qty, 0);
-  const totalCoffeeDrinks = Math.max(0, coffeeCategories.reduce((s,c) => s + c.qty, 0) - nonCoffeeQty);
-  const beansConsumedCalc = totalCoffeeDrinks * GRAMS_PER_DRINK; // grams
-
-  // From barista stock data
-  const begin = baristaData?.beansBegin ?? null;
-  const added = baristaData?.beansAdded ?? 0;
-  const end   = baristaData?.beansEnd   ?? null;
-
-  const totalAvailable = begin !== null ? begin + added : null;
-  const beansConsumedActual = (totalAvailable !== null && end !== null)
-    ? totalAvailable - end : null;
-
-  const discrepancy = (beansConsumedCalc !== null && beansConsumedActual !== null)
-    ? parseFloat((beansConsumedActual - beansConsumedCalc).toFixed(0)) : null;
-
-  // % variance
-  const discPct = (discrepancy !== null && beansConsumedCalc > 0)
-    ? parseFloat((discrepancy / beansConsumedCalc * 100).toFixed(1)) : null;
-
-  // Status
-  const status = discrepancy === null ? "unknown"
-    : Math.abs(discPct) <= 5  ? "ok"
-    : Math.abs(discPct) <= 15 ? "warn"
-    : "bad";
-
-  return {
-    coffeeCategories,
-    totalCoffeeDrinks,
-    beansConsumedCalc,   // expected consumption (g)
-    beansConsumedActual, // actual consumption from stock (g)
-    discrepancy,         // actual - expected (g). Positive = more used than expected
-    discPct,
-    status,
-    begin, added, end, totalAvailable,
-  };
-}
 
 // Simple markdown renderer
 function renderMD(text) {
@@ -471,145 +71,6 @@ function inlineFormat(text) {
     }
     return part;
   });
-}
-
-// Parsers
-function parseAcct(buf) {
-  const wb = XLSX.read(buf,{type:"array",cellDates:true,cellNF:false});
-  const MONS = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
-  const countD = ws => XLSX.utils.sheet_to_json(ws,{header:1,defval:null,raw:true}).filter(r=>r&&r[3]&&(r[3] instanceof Date||(typeof r[3]==="number"&&r[3]>40000))).length;
-  const meta = wb.SheetNames.map(name => {
-    const up=name.toUpperCase(); const yr=up.match(/20(\d{2})/); const year=yr?parseInt("20"+yr[1]):0;
-    const mo=MONS.findIndex(m=>up.includes(m))+1;
-    return {name,year,mo,named:(year>0||mo>0)?1:0};
-  });
-  const pool = meta.filter(s=>s.named).length>0?meta.filter(s=>s.named):meta;
-  pool.sort((a,b)=>b.year!==a.year?b.year-a.year:b.mo!==a.mo?b.mo-a.mo:countD(wb.Sheets[b.name])-countD(wb.Sheets[a.name]));
-  const sn = pool[0]?.name||wb.SheetNames[wb.SheetNames.length-1];
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:null,raw:true});
-  const data=[],issues=[];
-  for(let i=0;i<rows.length;i++){
-    const row=rows[i]; const date=excelDate(row[3]); if(!date||!date.match(/\d{4}-\d{2}-\d{2}/)) continue;
-    const total=n(row[8]); if(total===0&&n(row[4])===0&&n(row[5])===0) continue;
-    if(!row[17]&&!row[16]) issues.push({date,issue:"Net of Sale missing"});
-    const yr=parseInt(date.split("-")[0]); if(yr<2025||yr>2030) issues.push({date,issue:`Year looks wrong (${yr})`});
-    data.push({date,cash:n(row[4]),creditCard:n(row[5]),roomSale:n(row[6]),tips:n(row[7]),totalSale:total,purchase:n(row[16]),netSale:n(row[17]),cashInHand:n(row[18])});
-  }
-  return {data,sheetName:sn,issues};
-}
-
-function parsePOS(text) {
-  const lines=text.trim().split("\n").map(l=>l.replace(/\r/g,"").trim());
-  const get=kw=>{for(const l of lines){const c=l.split(";");if(c[0].toUpperCase().includes(kw.toUpperCase())){const v=n(c[2]||c[1]);if(v>0)return v;}}return 0;};
-  const summary={totalSales:get("TOTAL SALES:")||get("NET SALES"),cash:get("CASH"),visa:get("VISA"),mastercard:get("MASTERCARD"),discount:get("DISCOUNT"),tips:get("TIP"),receipts:get("#RECEIPTS"),pax:get("#PAX")};
-  summary.card=summary.visa+summary.mastercard; summary.netSales=get("NET SALES")||summary.totalSales;
-  const CATS=["COLD COFFEE","MOJITOS","COLD DRINKS","DESSERTS","DISPLAY FRIDGE","DISPLAY ITEMS","HOT COFFEE","HOT DRINKS","ICE CREAM","MILKSHAKES"];
-  const SKIP=new Set(["TEXT5","TEXT6","TEXT7","TOTAL","TOTAL SALES:","NET SALES","TOTAL AMOUNT","TOTAL SALES WITHOUT TIP","BALANCE","SETTLED","#PAX","#PAYMENTS","#RECEIPTS","SALES PER PAX","SALES PER RECEIPT","#VOID RECEIPTS","DISCOUNT","EXTRA CHARGE","ROUND OFF","TAX","TIP","-N/A-","DINE IN","TAKEAWAY","NO CHARGE","EMPLOYEE DISCOUNT","LOCALS DISCOUNT","OWNER DISCOUNT","CASH","MASTERCARD","VISA","OWNER 1 AHMED","COLD COFFEE","MOJITOS","COLD DRINKS","DESSERTS","DISPLAY FRIDGE","DISPLAY ITEMS","HOT COFFEE","HOT DRINKS","ICE CREAM","MILKSHAKES"]);
-  const serviceTypes=[],categories=[],menuItems=[];
-  for(const l of lines){
-    const c=l.split(";"); const label=c[0].trim(); const up=label.toUpperCase();
-    if(["DINE IN","TAKEAWAY","NO CHARGE"].includes(up)&&n(c[2])>0) serviceTypes.push({name:label,qty:n(c[1]),amount:n(c[2])});
-    if(CATS.includes(up)&&n(c[1])>0) categories.push({name:label,qty:n(c[1]),amount:n(c[2])});
-    if(!label||SKIP.has(up)) continue;
-    const qty=n(c[1]),amt=n(c[2]); if(qty>0&&amt>0) menuItems.push({name:label,qty,amount:amt,avg:parseFloat((amt/qty).toFixed(3))});
-  }
-  menuItems.sort((a,b)=>b.amount-a.amount);
-  return {summary,serviceTypes,categories,menuItems,valid:summary.totalSales>0};
-}
-
-function parseBarista(text) {
-  if(!text) return null;
-  const lines = text.split("\n").map(l=>l.trim()).filter(Boolean);
-
-  // Extract numbers: "item : 123" or "item = 123"
-  const extractNum = (line) => {
-    const m = line.match(/[:=]\s*([\d.,]+)/);
-    return m ? parseFloat(m[1].replace(/,/g,"")) : null;
-  };
-  const extractLabel = (line) => line.replace(/[🔹🔸▪️]/g,"").replace(/[:=].*$/,"").trim().replace(/\s+/g," ");
-
-  let section = "";
-  const purchased=[], remaining=[], dairy=[], spoilage=[], sweets=[];
-  let sweetsTotal=null, beansBegin=null, beansAdded=0, beansEnd=null;
-
-  for(const line of lines){
-    const up = line.toUpperCase();
-    if(up.includes("PURCHASED")) { section="purchased"; continue; }
-    if(up.includes("REMAINING")) { section="remaining"; continue; }
-    if(up.includes("DAIRY")) { section="dairy"; continue; }
-    if(up.includes("SALES")) { section="sales"; continue; }
-    if(up.includes("SWEETS")) { section="sweets"; continue; }
-    if(up.includes("COFFEE BEANS")||up.includes("BEANS STOCK")||(up.includes("BEANS")&&up.includes("STOCK"))) { section="beans"; continue; }
-    if(up.includes("SPOILAGE")) { section="spoilage"; continue; }
-
-    const num = extractNum(line);
-    const label = extractLabel(line);
-
-    if(section==="purchased" && num!==null && label) purchased.push({item:label, qty:num});
-    if(section==="remaining" && num!==null && label) remaining.push({item:label, qty:num});
-    if(section==="dairy" && num!==null && label) dairy.push({item:label, qty:num});
-    if(section==="spoilage" && num!==null && label) spoilage.push({item:label, qty:num});
-    if(section==="sweets"){
-      if(up.includes("TOTAL")) sweetsTotal=num;
-      else if(num!==null && label) sweets.push({item:label, qty:num});
-    }
-    if(section==="beans"){
-      // Expect lines like:
-      // Beginning stock : 1000g  (or 1kg)
-      // Added mid-month : 1000g
-      // End of month    : 200g
-      const gramsMatch = line.match(/[:=]\s*([\d.]+)\s*(g|kg|grams|kilos?)/i);
-      if(gramsMatch){
-        const val = parseFloat(gramsMatch[1]) * (gramsMatch[2].toLowerCase().startsWith("k") ? 1000 : 1);
-        if(up.includes("BEGIN")||up.includes("START")||up.includes("OPENING")) beansBegin=val;
-        else if(up.includes("ADD")||up.includes("MID")||up.includes("PURCHAS")||up.includes("BOUGHT")) beansAdded+=val;
-        else if(up.includes("END")||up.includes("CLOSING")||up.includes("REMAIN")||up.includes("LEFT")) beansEnd=val;
-      }
-    }
-    // sales section is noted but figures come from HISTORICAL_SALES, not parsed here
-  }
-
-  return { purchased, remaining, dairy, spoilage, sweets, sweetsTotal, beansBegin, beansAdded, beansEnd, raw:text };
-}
-
-function cleanNarr(s) {
-  const pos=s.match(/POS\s+\d+-(.*?)(?:\s+512\.|\s+\d{6,}|@|$)/); if(pos) return "POS — "+pos[1].trim().replace(/\b\w/g,c=>c.toUpperCase());
-  if(s.toLowerCase().includes("transfer")) return "Transfer — "+s.replace(/Transfer\s+/i,"").replace(/\b\d{8,}\b/g,"").replace(/\bLFT\w+\b/g,"").replace(/\s+/g," ").trim().slice(0,50);
-  if(s.includes("ACH Inward")||s.includes("ACH Direct Credit")) return "ACH Credit (Sales Deposit)";
-  if(s.includes("Value Added Tax")) return "VAT Payment";
-  if(s.toUpperCase().includes("SALARY")) return "Monthly Salary";
-  if(s.toUpperCase().includes("SWIFT CHARGES")) return "SWIFT Bank Charges";
-  if(s.toUpperCase().includes("SWIFT")) return "SWIFT Payment";
-  if(s.includes("Reversal")) return "Bank Reversal/Adjustment";
-  return s.replace(/\b\d{8,}\b/g,"").replace(/\bFT\w+\b/g,"").replace(/@[\d.]+/g,"").replace(/\s+/g," ").trim().slice(0,50);
-}
-
-function parseBank(buf) {
-  const wb=XLSX.read(buf,{type:"array"});
-  const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:null});
-  const txns=[];
-  for(let i=0;i<rows.length;i++){
-    const row=rows[i]; if(!row||!row[3]) continue;
-    const ds=String(row[3]).trim(); if(!ds.match(/\d{1,2}\/\d{1,2}\/\d{4}/)) continue;
-    const narr=row[5]?String(row[5]).trim():""; if(!narr) continue;
-    const debit=row[6]?parseFloat(String(row[6]))||0:0;
-    const credit=row[7]?parseFloat(String(row[7]))||0:0;
-    const balance=row[8]?parseFloat(String(row[8]))||0:0;
-    const type=debit>0?"debit":"credit"; const amount=debit>0?debit:credit;
-    txns.push({date:ds,desc:cleanNarr(narr),raw:narr,amount,type,balance});
-  }
-  return txns;
-}
-
-function reconcile(acct,pos) {
-  const sm=fn=>acct.reduce((s,r)=>s+fn(r),0);
-  return {
-    acctTotal:sm(r=>r.totalSale), acctCash:sm(r=>r.cash), acctCard:sm(r=>r.creditCard),
-    acctNet:sm(r=>r.netSale), acctPurchase:sm(r=>r.purchase),
-    salesVar:parseFloat((pos.totalSales-sm(r=>r.totalSale)).toFixed(3)),
-    cashVar:parseFloat((pos.cash-sm(r=>r.cash)).toFixed(3)),
-    cardVar:parseFloat((pos.card-sm(r=>r.creditCard)).toFixed(3)),
-  };
 }
 
 // UI primitives
@@ -694,6 +155,29 @@ export default function App() {
   const [waSending,setWaSending]=useState(false);
   const [waSent,setWaSent]=useState([]);
   const [waError,setWaError]=useState("");
+  // Auth (shared-secret gate for the API routes)
+  const [authed,setAuthed]=useState(false);
+  const [authChecked,setAuthChecked]=useState(false);
+  const [pwInput,setPwInput]=useState("");
+  const [pwError,setPwError]=useState("");
+  const [pwBusy,setPwBusy]=useState(false);
+  // Draft for the barista paste box (kept separate so the box doesn't unmount mid-typing)
+  const [baristaDraft,setBaristaDraft]=useState("");
+
+  // ── AUTH ────────────────────────────────────────────────────────────
+  const PW_KEY = "peak_app_pw";
+  const getPw = () => { try { return sessionStorage.getItem(PW_KEY) || ""; } catch { return ""; } };
+  useEffect(() => { if (getPw()) setAuthed(true); setAuthChecked(true); }, []);
+  const doLogin = async () => {
+    setPwBusy(true); setPwError("");
+    try {
+      const res = await fetch("/api/auth", { method:"POST", headers:{ "Content-Type":"application/json", "x-app-password":pwInput } });
+      if (res.ok) { try { sessionStorage.setItem(PW_KEY, pwInput); } catch {} setAuthed(true); setPwInput(""); }
+      else { const d = await res.json().catch(()=>({})); setPwError(d.error || "Incorrect password"); }
+    } catch(e) { setPwError("Network error: " + e.message); }
+    setPwBusy(false);
+  };
+  const logout = () => { try { sessionStorage.removeItem(PW_KEY); } catch {} setAuthed(false); };
 
   // ── PERSISTENT STORAGE ──────────────────────────────────────────────
   // Load saved data on mount
@@ -762,6 +246,7 @@ export default function App() {
     const parsed = parseBarista(text);
     setBaristaData(parsed);
     setBaristaText(text);
+    setBaristaDraft(text);
   };
 
   const analyse=async()=>{
@@ -801,13 +286,7 @@ Bottom 5 Slowest: ${bottomItems}
 
 STOCK & SPOILAGE (Barista Report):
 ${(()=>{
-      const MONS=["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
-      const mo=acctSheet?MONS.findIndex(m=>acctSheet.toUpperCase().includes(m))+1:null;
-      const yrM=acctSheet?acctSheet.match(/20(\d{2})/):[null];
-      const yr=yrM?parseInt("20"+yrM[1]):new Date().getFullYear();
-      const curr=posData?.summary?.totalSales||null;
-      const prev=mo?HISTORICAL_SALES[yr-1]?.[mo]||null:null;
-      const growth=prev&&curr?parseFloat(((curr-prev)/prev*100).toFixed(1)):null;
+      const { yr, prev, growth } = yoy(acctSheet, posData?.summary?.totalSales);
       return growth!==null?`Year-on-Year Growth: ${growth}% vs same month last year\nPrevious Year Same Month (${yr-1}): ${prev.toFixed(3)} OMR (from annual files)`:"Year-on-Year: No historical data for this month";
     })()}
 ${(()=>{
@@ -847,7 +326,8 @@ Summarize purchased items, remaining stock, spoilage, and sweets cost. Flag any 
 ⚠️ FLAGS & ACTION ITEMS
 Numbered list of issues requiring attention.`;
     try{
-      const res=await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt})});
+      const res=await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json","x-app-password":getPw()},body:JSON.stringify({prompt})});
+      if(res.status===401){ logout(); setAiReport(""); setAiError("Session expired. Please sign in again."); setAiLoad(false); return; }
       const d=await res.json();
       if(res.ok && d.text){ setAiReport(d.text); setAiError(""); }
       else { setAiReport(""); setAiError(d.error||"Could not generate report. Please try again."); }
@@ -857,13 +337,6 @@ Numbered list of issues requiring attention.`;
 
   const sendWhatsApp = async () => {
     setWaSending(true); setWaSent([]); setWaError("");
-    const MONS = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
-    const mo = acctSheet ? MONS.findIndex(m=>acctSheet.toUpperCase().includes(m))+1 : null;
-    const yrM = acctSheet ? acctSheet.match(/20(\d{2})/) : null;
-    const yr = yrM ? parseInt("20"+yrM[1]) : new Date().getFullYear();
-    const prev = mo ? HISTORICAL_SALES[yr-1]?.[mo]||null : null;
-    const curr = posData?.summary?.totalSales||0;
-    const growth = prev&&curr ? parseFloat(((curr-prev)/prev*100).toFixed(1)) : null;
     const deb2 = bankTxns?bankTxns.filter(t=>t.type==="debit"):[];
     const totExp2 = deb2.reduce((s,t)=>s+t.amount,0);
     const profit = totExp2>0 ? (rec.acctNet-totExp2).toFixed(3)+" OMR" : "N/A";
@@ -897,9 +370,10 @@ Numbered list of issues requiring attention.`;
     try {
       const res = await fetch("/api/whatsapp", {
         method:"POST",
-        headers:{"Content-Type":"application/json"},
+        headers:{"Content-Type":"application/json","x-app-password":getPw()},
         body:JSON.stringify({variables, pdfBase64, filename}),
       });
+      if(res.status===401){ logout(); setWaError("Session expired. Please sign in again."); setWaSending(false); return; }
       const d = await res.json();
       const sent = d.results?.filter(r=>r.status==="sent").map(r=>r.number)||[];
       const failed = d.results?.filter(r=>r.status==="failed")||[];
@@ -921,6 +395,28 @@ Numbered list of issues requiring attention.`;
   // Expose setPdfMode to generatePDF function
 
 
+  // Avoid a flash of the app before we know whether a session exists.
+  if(!authChecked) return null;
+
+  // Login gate — the app and its API routes require the shared password.
+  if(!authed) {
+    return <div style={{minHeight:"100vh",background:B.cream,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Source Sans 3,sans-serif",padding:20}}>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Source+Sans+3:wght@400;600&display=swap"/>
+      <div style={{background:B.white,border:`1px solid ${B.bord}`,borderTop:`4px solid ${B.gold}`,borderRadius:10,padding:"32px 28px",width:"100%",maxWidth:380,boxShadow:"0 8px 32px rgba(30,61,47,.12)"}}>
+        <div style={{fontSize:10,letterSpacing:".45em",color:B.gold,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:600,marginBottom:6}}>The Peak Coffee Shop</div>
+        <div style={{fontSize:20,fontWeight:800,color:B.forest,fontFamily:"Montserrat,sans-serif",marginBottom:4}}>Monthly Owner Report</div>
+        <div style={{fontSize:12,color:B.txtM,marginBottom:20}}>Enter the access password to continue.</div>
+        <input type="password" value={pwInput} autoFocus placeholder="Access password"
+          onChange={e=>setPwInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!pwBusy&&doLogin()}
+          style={{width:"100%",padding:"11px 14px",fontFamily:"Source Sans 3,sans-serif",fontSize:14,color:B.txtD,background:B.cream,border:`1px solid ${B.bord}`,borderRadius:6,outline:"none",marginBottom:12}}/>
+        {pwError&&<div style={{background:B.sRedBg,border:`1px solid ${B.sRedBd}`,borderRadius:6,padding:"8px 12px",color:B.sRed,fontSize:12,marginBottom:12}}>{pwError}</div>}
+        <button onClick={doLogin} disabled={pwBusy||!pwInput} style={{width:"100%",background:pwBusy||!pwInput?B.cream3:B.forest,color:pwBusy||!pwInput?B.txtDim:B.white,border:`2px solid ${pwBusy||!pwInput?"transparent":B.gold}`,padding:"12px 0",fontFamily:"Montserrat,sans-serif",fontSize:12,letterSpacing:".15em",textTransform:"uppercase",cursor:pwBusy||!pwInput?"not-allowed":"pointer",borderRadius:6,fontWeight:700}}>
+          {pwBusy?"Checking…":"Sign In"}
+        </button>
+      </div>
+    </div>;
+  }
+
   // PDF view mode — renders the branded report for printing
   if(pdfMode && pdfHtml) {
     return <div style={{minHeight:"100vh",background:"#f0f0f0",display:"flex",flexDirection:"column",alignItems:"center",padding:"20px 0"}}>
@@ -929,7 +425,7 @@ Numbered list of issues requiring attention.`;
         <button onClick={()=>setPdfMode(false)} style={{background:B.white,color:B.forest,border:`2px solid ${B.bord}`,padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:12,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:6,fontWeight:700}}>← Back to Report</button>
       </div>
       <style>{`@media print { .no-print { display:none!important; } body { margin:0; } } @page { size:A4; margin:15mm; }`}</style>
-      <div className="no-print" style={{fontSize:12,color:"#666",marginBottom:8,textAlign:"center"}}>Click "Print / Save as PDF" → choose your printer or "Save as PDF"</div>
+      <div className="no-print" style={{fontSize:12,color:"#666",marginBottom:8,textAlign:"center"}}>Click “Print / Save as PDF” → choose your printer or “Save as PDF”</div>
       <iframe srcDoc={pdfHtml} style={{width:"210mm",minHeight:"297mm",border:"none",boxShadow:"0 4px 24px rgba(0,0,0,.2)",background:"#fff"}} title="PDF Preview"/>
     </div>;
   }
@@ -963,12 +459,15 @@ Numbered list of issues requiring attention.`;
         • <strong style={{color:B.forest}}>Bank statement:</strong> Upload .xls from bank (optional)
       </div>
 
-      {/* Clear saved data */}
-      {(acctData||posData)&&<div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
-        <button onClick={clearSaved} style={{background:"transparent",border:`1px solid ${B.sRedBd}`,color:B.sRed,padding:"5px 14px",fontFamily:"Montserrat,sans-serif",fontSize:10,letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>
+      {/* Clear saved data / sign out */}
+      <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:8}}>
+        {(acctData||posData)&&<button onClick={clearSaved} style={{background:"transparent",border:`1px solid ${B.sRedBd}`,color:B.sRed,padding:"5px 14px",fontFamily:"Montserrat,sans-serif",fontSize:10,letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>
           ✕ Clear All Saved Data
+        </button>}
+        <button onClick={logout} style={{background:"transparent",border:`1px solid ${B.bord}`,color:B.txtM,padding:"5px 14px",fontFamily:"Montserrat,sans-serif",fontSize:10,letterSpacing:".1em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>
+          Sign Out
         </button>
-      </div>}
+      </div>
 
       {/* Uploads */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:14}}>
@@ -977,20 +476,27 @@ Numbered list of issues requiring attention.`;
         <UpBox title="3 — Bank Statement" fname={bankFile?.name} loaded={!!bankFile} onFile={handleBank} mode="binary"/>
         <UpBox title="4 — Barista Stock Report" fname={baristaData?"Loaded":"Paste text below"} loaded={!!baristaData} onFile={()=>{}} mode="text"/>
       </div>
-      {/* Barista paste box */}
+      {/* Barista paste box — controlled draft so the box never unmounts while typing */}
       {!baristaData&&<div style={{marginBottom:14}}>
         <textarea placeholder="Paste the barista WhatsApp stock message here (stock list, sales, spoilage)..." rows={5}
-          onChange={e=>e.target.value.length>20&&handleBaristaText(e.target.value)}
+          value={baristaDraft}
+          onChange={e=>setBaristaDraft(e.target.value)}
           style={{width:"100%",padding:"10px 14px",fontFamily:"Source Sans 3,sans-serif",fontSize:12,color:B.txtD,background:B.white,border:`1px solid ${B.bord}`,borderLeft:`4px solid ${B.forest}`,borderRadius:6,resize:"vertical",outline:"none",lineHeight:1.6}}/>
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}>
+          <button onClick={()=>handleBaristaText(baristaDraft)} disabled={baristaDraft.trim().length<20}
+            style={{background:baristaDraft.trim().length<20?B.cream3:B.forest,color:baristaDraft.trim().length<20?B.txtDim:B.white,border:`2px solid ${baristaDraft.trim().length<20?"transparent":B.gold}`,padding:"8px 18px",fontFamily:"Montserrat,sans-serif",fontSize:10,letterSpacing:".12em",textTransform:"uppercase",cursor:baristaDraft.trim().length<20?"not-allowed":"pointer",borderRadius:4,fontWeight:700}}>
+            Load Barista Report
+          </button>
+        </div>
       </div>}
       {baristaData&&<div style={{marginBottom:14,padding:"10px 16px",background:B.sGreenBg,border:`1px solid ${B.sGreenBd}`,borderRadius:6,fontSize:11,color:B.sGreen,fontFamily:"Montserrat,sans-serif",fontWeight:600,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         ✓ Barista report loaded — {baristaData.purchased.length} purchased items, {baristaData.remaining.length} remaining, {baristaData.spoilage.length} spoilage items
-        <button onClick={()=>{setBaristaData(null);setBaristaText("");}} style={{background:"transparent",border:`1px solid ${B.sGreenBd}`,color:B.sGreen,cursor:"pointer",padding:"3px 10px",borderRadius:4,fontFamily:"Montserrat,sans-serif",fontSize:10,fontWeight:700}}>✕ Clear</button>
+        <button onClick={()=>{setBaristaData(null);setBaristaText("");setBaristaDraft("");}} style={{background:"transparent",border:`1px solid ${B.sGreenBd}`,color:B.sGreen,cursor:"pointer",padding:"3px 10px",borderRadius:4,fontFamily:"Montserrat,sans-serif",fontSize:10,fontWeight:700}}>✕ Clear</button>
       </div>}
 
       {/* Status */}
       <div style={{display:"flex",gap:16,flexWrap:"wrap",fontSize:11,fontFamily:"Montserrat,sans-serif",fontWeight:600,marginBottom:14,minHeight:18}}>
-        {acctData&&<span style={{color:B.sGreen}}>✓ Accountant: {acctData.length} days from "{acctSheet}"</span>}
+        {acctData&&<span style={{color:B.sGreen}}>✓ Accountant: {acctData.length} days from “{acctSheet}”</span>}
         {acctIssues.length>0&&<span style={{color:B.gold}}>△ {acctIssues.length} data issue(s)</span>}
         {posData&&<span style={{color:B.sGreen}}>✓ POS: {f(posData.summary.totalSales)} OMR | {posData.menuItems.length} items</span>}
         {bankTxns&&<span style={{color:B.sGreen}}>✓ Bank: {bankTxns.length} transactions</span>}
@@ -1015,18 +521,11 @@ Numbered list of issues requiring attention.`;
 
           {/* YoY Comparison — always from historical files */}
           {(()=>{
-            // Derive month and year from acctSheet (e.g. "MAY 2026")
-            const MONS = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
-            const mo = acctSheet ? MONS.findIndex(m=>acctSheet.toUpperCase().includes(m))+1 : null;
-            const yrMatch = acctSheet ? acctSheet.match(/20(\d{2})/) : null;
-            const yr = yrMatch ? parseInt("20"+yrMatch[1]) : new Date().getFullYear();
-            const curr = posData?.summary?.totalSales || null;
-            const prev = mo ? (HISTORICAL_SALES[yr-1]?.[mo] || null) : null;
+            // Year-on-year comparison derived from the accountant sheet name.
+            const { yr, prev, curr, growth } = yoy(acctSheet, posData?.summary?.totalSales);
             if(!prev||!curr) return null;
-            const growth = parseFloat(((curr-prev)/prev*100).toFixed(1));
             const diff=parseFloat((curr-prev).toFixed(3));
             const isUp=growth>=0;
-            const prevYrLabel=yr-1;
             return <div style={{background:isUp?B.sGreenBg:B.sRedBg,border:`2px solid ${isUp?B.sGreenBd:B.sRedBd}`,borderRadius:8,padding:"18px 22px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
               <div>
                 <div style={{fontSize:10,letterSpacing:".3em",color:isUp?B.sGreen:B.sRed,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:700,marginBottom:4}}>Year-on-Year Sales Comparison</div>
@@ -1208,9 +707,8 @@ Numbered list of issues requiring attention.`;
 
         {/* History Tab */}
         {tab==="history"&&(()=>{
-          // Determine current month from acctSheet or posData
-          const mo = acctSheet ? (["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"].findIndex(m=>acctSheet.toUpperCase().includes(m))+1) : null;
-          const yr = acctSheet ? (acctSheet.match(/20(\d{2})/) ? parseInt("20"+acctSheet.match(/20(\d{2})/)[1]) : new Date().getFullYear()) : new Date().getFullYear();
+          // Determine current month/year from the accountant sheet name.
+          const { mo, yr } = deriveMonthYear(acctSheet);
           const currentMonthSales = posData?.summary?.totalSales || null;
 
           // Build enriched data with current month injected
@@ -1333,14 +831,8 @@ Numbered list of issues requiring attention.`;
           {baristaData?<>
             {/* YoY Sales Comparison */}
             {(()=>{
-              const MONS=["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
-              const mo=acctSheet?MONS.findIndex(m=>acctSheet.toUpperCase().includes(m))+1:null;
-              const yrM=acctSheet?acctSheet.match(/20(\d{2})/):[null];
-              const yr=yrM?parseInt("20"+yrM[1]):new Date().getFullYear();
-              const curr=posData?.summary?.totalSales||null;
-              const prev=mo?HISTORICAL_SALES[yr-1]?.[mo]||null:null;
+              const { yr, prev, curr, growth } = yoy(acctSheet, posData?.summary?.totalSales);
               if(!prev||!curr) return null;
-              const growth=parseFloat(((curr-prev)/prev*100).toFixed(1));
               return <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
                 <Stat label={`${yr-1} Same Month`} value={prev.toFixed(3)} sub="OMR (from annual files)" color={B.txtM} accent={B.txtM}/>
                 <Stat label={`${yr} This Month`} value={curr.toFixed(3)} sub="OMR (from POS)" color={B.forest} accent={B.forest}/>
@@ -1550,10 +1042,10 @@ Numbered list of issues requiring attention.`;
                       {waSent.map((r,i)=><div key={i} style={{fontSize:11,color:B.sGreen,fontFamily:"Montserrat,sans-serif",fontWeight:600}}>✓ Sent to {r}</div>)}
                     </div>}
                     {waError&&<div style={{marginTop:10,padding:"8px 12px",background:B.sRedBg,border:`1px solid ${B.sRedBd}`,borderRadius:4,fontSize:11,color:B.sRed}}>{waError}</div>}
-                    <div style={{fontSize:11,color:B.txtM,marginTop:8}}>Sending to: +968 92114333, +968 96378879, +968 99107107</div>
+                    <div style={{fontSize:11,color:B.txtM,marginTop:8}}>Sending to all owners configured on the server (OWNER_NUMBERS).</div>
                   </div>}
               </div>
-            </>:<div style={{textAlign:"center",padding:32,color:B.txtDim,fontSize:13}}>Click "Generate Full Month Report" above to create the owner report.</div>}
+            </>:<div style={{textAlign:"center",padding:32,color:B.txtDim,fontSize:13}}>Click “Generate Full Month Report” above to create the owner report.</div>}
           </Card>
         </div>}
       </>}
