@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { n, f, excelDate } from "../lib/format";
 import { deriveMonthYear, yoy, HISTORICAL_SALES } from "../lib/sales";
-import { parsePOS, parseBarista, reconcile } from "../lib/parsers";
+import { parsePOS, parseBarista, reconcile, categorizeExpense } from "../lib/parsers";
 import { calcBeans } from "../lib/beans";
+import { generatePDF } from "../lib/pdf";
 
 describe("format helpers", () => {
   it("coerces messy values to numbers", () => {
@@ -111,6 +112,18 @@ describe("reconcile", () => {
   });
 });
 
+describe("categorizeExpense", () => {
+  it("buckets common bank narrations", () => {
+    expect(categorizeExpense("Monthly Salary transfer")).toBe("Salaries");
+    expect(categorizeExpense("Value Added Tax payment")).toBe("Tax (VAT)");
+    expect(categorizeExpense("SWIFT CHARGES")).toBe("Bank Charges");
+    expect(categorizeExpense("Transfer to supplier")).toBe("Transfers / Suppliers");
+    expect(categorizeExpense("ACH Inward")).toBe("Transfers / Suppliers");
+    expect(categorizeExpense("Reversal adjustment")).toBe("Adjustments");
+    expect(categorizeExpense("Some misc payment")).toBe("Other");
+  });
+});
+
 describe("calcBeans", () => {
   const posData = {
     categories: [
@@ -132,5 +145,46 @@ describe("calcBeans", () => {
     const b = calcBeans(posData, null);
     expect(b.discrepancy).toBeNull();
     expect(b.status).toBe("unknown");
+  });
+});
+
+describe("generatePDF", () => {
+  const rec = {
+    acctTotal: 1560.5, acctCash: 600, acctCard: 960.5, acctNet: 1400, acctPurchase: 160.5,
+    salesVar: 0, cashVar: 0, cardVar: 0,
+  };
+  const posData = {
+    summary: { totalSales: 1560.5, cash: 600, visa: 700, mastercard: 260.5, card: 960.5, discount: 20, tips: 15, receipts: 244, pax: 380, netSales: 1560.5 },
+    categories: [ { name: "HOT COFFEE", qty: 300, amount: 900 }, { name: "COLD COFFEE", qty: 200, amount: 660.5 } ],
+    serviceTypes: [ { name: "DINE IN", qty: 150, amount: 950 }, { name: "TAKEAWAY", qty: 94, amount: 610.5 } ],
+    menuItems: [ { name: "Latte", qty: 120, amount: 480, avg: 4 }, { name: "Espresso", qty: 90, amount: 270, avg: 3 } ],
+  };
+  const bankTxns = [
+    { date: "01/05/2026", desc: "Monthly Salary", raw: "Monthly Salary", amount: 420, type: "debit", balance: 0 },
+    { date: "10/05/2026", desc: "VAT Payment", raw: "Value Added Tax", amount: 180, type: "debit", balance: 0 },
+    { date: "15/05/2026", desc: "Transfer — Beans Supplier", raw: "Transfer to supplier", amount: 200, type: "debit", balance: 0 },
+  ];
+  const baristaData = { beansBegin: 1000, beansAdded: 1000, beansEnd: 200, spoilage: [] };
+
+  const html = generatePDF("# Report\nSome analysis.", rec, posData, bankTxns, "MAY 2026", [], baristaData);
+
+  it("renders all new data-representation sections", () => {
+    expect(html).toContain("Profit Margin");
+    expect(html).toContain("Avg / Receipt");
+    expect(html).toContain("May Sales — Year on Year");
+    expect(html).toContain("Revenue by Category");
+    expect(html).toContain("Payment Mix");
+    expect(html).toContain("Expenses by Category");
+    expect(html).toContain("Coffee Beans Analysis");
+  });
+  it("groups expenses by category with a total", () => {
+    expect(html).toContain("Salaries");
+    expect(html).toContain("Tax (VAT)");
+    expect(html).toContain("Transfers / Suppliers");
+    expect(html).toContain("TOTAL EXPENSES");
+  });
+  it("omits the beans section when no stock data is provided", () => {
+    const noBeans = generatePDF("x", rec, posData, bankTxns, "MAY 2026", [], { spoilage: [] });
+    expect(noBeans).not.toContain("Coffee Beans Analysis");
   });
 });
