@@ -3,6 +3,8 @@
 // The template has a DOCUMENT header, so we upload the report PDF to WhatsApp
 // media once, then send the template (header document + body params) to each owner.
 
+import { checkAuth } from "../../lib/auth";
+
 export const config = {
   api: {
     // PDF arrives as base64 in the JSON body — allow room for it.
@@ -14,6 +16,9 @@ const GRAPH = "https://graph.facebook.com/v18.0";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  const auth = checkAuth(req);
+  if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
   const { variables, pdfBase64, filename } = req.body;
   if (!variables || !Array.isArray(variables)) {

@@ -18,11 +18,16 @@ cp .env.example .env.local
 
 | Variable | Description |
 |---|---|
+| `APP_PASSWORD` | **Required.** Shared password that gates the app and its API routes. Without it the API routes refuse to run. |
 | `ANTHROPIC_API_KEY` | Your Anthropic API key (from console.anthropic.com) |
+| `ANTHROPIC_MODEL` | Optional model override (defaults to `claude-sonnet-4-6`) |
 | `META_WHATSAPP_TOKEN` | Permanent Meta system user token |
-| `META_PHONE_NUMBER_ID` | `1090243240836363` |
-| `OWNER_NUMBERS` | Comma-separated WhatsApp numbers |
+| `META_PHONE_NUMBER_ID` | Your Meta phone number ID |
+| `OWNER_NUMBERS` | Comma-separated WhatsApp numbers in international format |
 | `WHATSAPP_TEMPLATE_NAME` | `the_peak_monthly_report` |
+
+> Security note: the app is protected only by `APP_PASSWORD`. For a public
+> deployment, also enable Vercel's project-level password/access protection.
 
 ### 3. Run locally
 ```bash
@@ -58,9 +63,35 @@ vercel
 
 ## Updating Historical Sales Data
 
-Each January, add the new year's data to `HISTORICAL_SALES` in `pages/index.jsx`:
-```js
-2027: {1:xxxx, 2:xxxx, ...}
+Sales history lives in `data/historical-sales.json` (no code change needed).
+Each January, add the new year's data:
+```json
+"2027": { "1": 1234.56, "2": 789.01 }
+```
+Then add the year to `YEARS` in `lib/sales.js` so it appears in the history charts.
+
+## Security
+
+- **Access control.** The app and its API routes (`/api/generate`, `/api/whatsapp`)
+  are gated by `APP_PASSWORD`. If it is unset, the API routes refuse to run, so an
+  accidentally-public deployment cannot be used as a free Anthropic/WhatsApp proxy.
+  For public deployments, also enable Vercel project-level protection.
+- **`xlsx` dependency.** The public npm build (`0.18.5`) has known advisories
+  (CVE-2023-30533, CVE-2024-22363). The patched build is on the SheetJS CDN only.
+  For production install it explicitly:
+  ```bash
+  npm i https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz
+  ```
+- **Local data.** Uploaded financial data is cached in the browser's
+  `localStorage` so a refresh doesn't lose work. Use **Clear All Saved Data** /
+  **Sign Out** on shared machines.
+
+## Development
+
+```bash
+npm run lint   # ESLint (next/core-web-vitals)
+npm test       # Vitest unit tests for the parsers and helpers
+npm run build  # Production build
 ```
 
 ## Coffee Beans Tracking

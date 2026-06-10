@@ -1,0 +1,136 @@
+import { describe, it, expect } from "vitest";
+import { n, f, excelDate } from "../lib/format";
+import { deriveMonthYear, yoy, HISTORICAL_SALES } from "../lib/sales";
+import { parsePOS, parseBarista, reconcile } from "../lib/parsers";
+import { calcBeans } from "../lib/beans";
+
+describe("format helpers", () => {
+  it("coerces messy values to numbers", () => {
+    expect(n("1,234.50 OMR")).toBeCloseTo(1234.5);
+    expect(n("")).toBe(0);
+    expect(n(null)).toBe(0);
+    expect(n("-12.3")).toBeCloseTo(-12.3);
+  });
+  it("formats to 3 decimals", () => {
+    expect(f(2)).toBe("2.000");
+    expect(f("3.14159")).toBe("3.142");
+  });
+  it("normalizes dates", () => {
+    expect(excelDate("2026-05-01")).toBe("2026-05-01");
+    expect(excelDate("1/5/2026")).toBe("2026-05-01");
+    expect(excelDate(45413)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(excelDate("not a date")).toBeNull();
+  });
+});
+
+describe("deriveMonthYear / yoy", () => {
+  it("parses a sheet name like 'MAY 2026'", () => {
+    expect(deriveMonthYear("MAY 2026")).toEqual({ mo: 5, yr: 2026 });
+  });
+  it("returns null month when no month name is present", () => {
+    expect(deriveMonthYear("Sheet1").mo).toBeNull();
+  });
+  it("computes year-on-year growth from historical data", () => {
+    const prev = HISTORICAL_SALES[2025][5];
+    const r = yoy("MAY 2026", prev * 1.1);
+    expect(r.prev).toBeCloseTo(prev);
+    expect(r.growth).toBeCloseTo(10, 1);
+  });
+  it("returns null growth when no prior-year data exists", () => {
+    expect(yoy("MAY 2099", 1000).growth).toBeNull();
+  });
+});
+
+describe("parsePOS", () => {
+  const csv = [
+    "TOTAL SALES:;;1000",
+    "CASH;;400",
+    "VISA;;500",
+    "MASTERCARD;;100",
+    "HOT COFFEE;50;300",
+    "COLD COFFEE;30;200",
+    "Cappuccino;40;240",
+    "Latte;25;180",
+    "DINE IN;10;600",
+    "TAKEAWAY;5;400",
+    "DISCOUNT;;20",
+    "#RECEIPTS;;15",
+    "#PAX;;20",
+  ].join("\n");
+
+  it("reads the summary totals", () => {
+    const d = parsePOS(csv);
+    expect(d.valid).toBe(true);
+    expect(d.summary.totalSales).toBe(1000);
+    expect(d.summary.cash).toBe(400);
+    expect(d.summary.card).toBe(600);
+  });
+  it("collects categories and ranks menu items by revenue", () => {
+    const d = parsePOS(csv);
+    expect(d.categories.map((c) => c.name)).toContain("HOT COFFEE");
+    expect(d.menuItems[0].amount).toBeGreaterThanOrEqual(d.menuItems[1].amount);
+    expect(d.menuItems.find((m) => m.name === "Cappuccino").avg).toBeCloseTo(6);
+  });
+});
+
+describe("parseBarista", () => {
+  const msg = [
+    "PURCHASED",
+    "Milk : 20",
+    "REMAINING",
+    "Cups : 500",
+    "SPOILAGE",
+    "Croissant : 3",
+    "COFFEE BEANS STOCK",
+    "Beginning stock : 1kg",
+    "Added mid-month : 1000g",
+    "End of month : 200g",
+  ].join("\n");
+
+  it("extracts sections and bean stock with unit conversion", () => {
+    const b = parseBarista(msg);
+    expect(b.purchased).toEqual([{ item: "Milk", qty: 20 }]);
+    expect(b.spoilage).toEqual([{ item: "Croissant", qty: 3 }]);
+    expect(b.beansBegin).toBe(1000); // 1kg -> 1000g
+    expect(b.beansAdded).toBe(1000);
+    expect(b.beansEnd).toBe(200);
+  });
+});
+
+describe("reconcile", () => {
+  it("sums accountant rows and computes variances vs POS", () => {
+    const acct = [
+      { totalSale: 500, cash: 200, creditCard: 300, netSale: 480, purchase: 20 },
+      { totalSale: 500, cash: 200, creditCard: 300, netSale: 480, purchase: 20 },
+    ];
+    const r = reconcile(acct, { totalSales: 1000, cash: 400, card: 600 });
+    expect(r.acctTotal).toBe(1000);
+    expect(r.salesVar).toBe(0);
+    expect(r.cashVar).toBe(0);
+    expect(r.cardVar).toBe(0);
+  });
+});
+
+describe("calcBeans", () => {
+  const posData = {
+    categories: [
+      { name: "HOT COFFEE", qty: 50 },
+      { name: "COLD COFFEE", qty: 30 },
+    ],
+    menuItems: [{ name: "Matcha Latte", qty: 10 }],
+  };
+
+  it("subtracts non-coffee items and flags discrepancy status", () => {
+    // 80 coffee-category drinks - 10 matcha = 70 -> 70*20 = 1400g expected.
+    const b = calcBeans(posData, { beansBegin: 2000, beansAdded: 0, beansEnd: 600 });
+    expect(b.totalCoffeeDrinks).toBe(70);
+    expect(b.beansConsumedCalc).toBe(1400);
+    expect(b.beansConsumedActual).toBe(1400);
+    expect(b.status).toBe("ok");
+  });
+  it("reports unknown status when stock data is missing", () => {
+    const b = calcBeans(posData, null);
+    expect(b.discrepancy).toBeNull();
+    expect(b.status).toBe("unknown");
+  });
+});
