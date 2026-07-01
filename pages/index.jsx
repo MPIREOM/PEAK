@@ -232,8 +232,9 @@ export default function App() {
       setAcctData(data);setAcctSheet(sheetName);setAcctIssues(issues);setAcctFile(file);setRec(null);setAiReport("");
     }catch(e){alert("Cannot read Excel: "+e.message);}
   };
-  const handlePos=(file,text)=>{
-    const d=parsePOS(text);
+  const handlePos=(file,content)=>{
+    let d;
+    try{d=parsePOS(content);}catch(e){alert("Cannot read POS report: "+e.message);return;}
     if(!d.valid){alert("Cannot read POS totals.");return;}
     setPosData(d);setPosFile(file);setRec(null);setAiReport("");
   };
@@ -472,7 +473,7 @@ Numbered list of issues requiring attention.`;
       {/* Uploads */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:14}}>
         <UpBox title="1 — Accountant Excel" fname={acctFile?.name} loaded={!!acctFile} onFile={handleAcct} mode="binary"/>
-        <UpBox title="2 — POS Cashier Report" fname={posFile?.name} loaded={!!posFile} onFile={handlePos} mode="text"/>
+        <UpBox title="2 — POS Cashier Report" fname={posFile?.name} loaded={!!posFile} onFile={handlePos} mode="binary"/>
         <UpBox title="3 — Bank Statement" fname={bankFile?.name} loaded={!!bankFile} onFile={handleBank} mode="binary"/>
         <UpBox title="4 — Barista Stock Report" fname={baristaData?"Loaded":"Paste text below"} loaded={!!baristaData} onFile={()=>{}} mode="text"/>
       </div>
