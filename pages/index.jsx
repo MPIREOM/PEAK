@@ -15,6 +15,9 @@ const B = {
   sYell:"#8a6518",  sYellBg:"#fef8ec",  sYellBd:"#e8d8a0",
 };
 
+// Subtle fractal-noise grain, used as a faint paper texture over the background.
+const TEXTURE = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E\")";
+
 // Strip emoji / pictographs (and any leftover leading punctuation) so headings
 // stay clean even if the model emits them.
 const EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{FE00}-\u{FE0F}\u{200D}]/gu;
@@ -62,11 +65,13 @@ function renderMD(text) {
     if(line.startsWith("# ")) { elements.push(<div key={key++} style={{fontSize:20,fontWeight:800,color:B.forest,fontFamily:"Montserrat,sans-serif",marginBottom:8,marginTop:16}}>{stripEmoji(line.slice(2))}</div>); continue; }
     // H2
     if(line.startsWith("## ")) { elements.push(<div key={key++} style={{fontSize:16,fontWeight:700,color:B.forest,fontFamily:"Montserrat,sans-serif",marginBottom:6,marginTop:14}}>{stripEmoji(line.slice(3))}</div>); continue; }
-    // H3 — section headers. A slim gold bar replaces the old emoji icons.
+    // H3 — editorial section header: gold kicker rule, tracked title, fading rule.
     if(line.startsWith("### ")) {
       const txt = stripEmoji(line.slice(4));
-      elements.push(<div key={key++} style={{fontSize:14,letterSpacing:".08em",color:B.forest,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:800,marginTop:28,marginBottom:14,paddingBottom:11,borderBottom:`2px solid ${B.gold}`,display:"flex",alignItems:"center",gap:10}}>
-        <span style={{display:"inline-block",width:4,height:16,borderRadius:2,background:B.gold,flexShrink:0}}/><span>{txt}</span>
+      elements.push(<div key={key++} style={{marginTop:32,marginBottom:16}}>
+        <div style={{width:34,height:3,borderRadius:2,background:B.gold,marginBottom:11}}/>
+        <div style={{fontSize:15,letterSpacing:".13em",color:B.forest,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:800}}>{txt}</div>
+        <div style={{height:1,marginTop:11,background:"linear-gradient(90deg, rgba(200,149,42,.55) 0%, rgba(200,149,42,.12) 45%, rgba(200,149,42,0) 100%)"}}/>
       </div>);
       continue;
     }
@@ -88,20 +93,37 @@ function renderMD(text) {
       </div>);
       continue;
     }
+    // Whole line wrapped in * or **: a short one is a sub-label (e.g. *Salaries*);
+    // a long one is a bold "bottom line" lead sentence.
+    const subH = line.trim().match(/^\*{1,2}([^*][^*]*?)\*{1,2}$/);
+    if(subH) {
+      const t = subH[1].trim();
+      if(t.length <= 48) {
+        elements.push(<div key={key++} style={{fontSize:12.5,fontWeight:800,color:B.forest,fontFamily:"Montserrat,sans-serif",letterSpacing:".04em",marginTop:16,marginBottom:7,display:"flex",alignItems:"center",gap:8}}>
+          <span style={{display:"inline-block",width:6,height:6,transform:"rotate(45deg)",background:B.gold,flexShrink:0}}/>{t}
+        </div>);
+      } else {
+        elements.push(<div key={key++} style={{fontSize:14.5,fontWeight:700,color:B.forest,fontFamily:"Montserrat,sans-serif",lineHeight:1.55,margin:"8px 0 10px",paddingLeft:12,borderLeft:`3px solid ${B.gold}`}}>{t}</div>);
+      }
+      continue;
+    }
     // Empty line = spacer
     if(line.trim()==="") { elements.push(<div key={key++} style={{height:10}}/>); continue; }
     // Regular paragraph
-    elements.push(<div key={key++} style={{fontSize:14,color:B.txtD,lineHeight:1.85,marginBottom:4}}>{inlineFormat(line)}</div>);
+    elements.push(<div key={key++} style={{fontSize:14,color:B.txtD,lineHeight:1.85,marginBottom:6}}>{inlineFormat(line)}</div>);
   }
   return <div>{elements}</div>;
 }
 
 function inlineFormat(text) {
-  // Handle **bold** inline
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  // Handle **bold** and *emphasis* inline (both rendered as emphasis)
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
   return parts.map((part, i) => {
-    if(part.startsWith("**")&&part.endsWith("**")) {
+    if(part.startsWith("**")&&part.endsWith("**")&&part.length>4) {
       return <strong key={i} style={{fontWeight:700,color:B.forest,fontFamily:"Montserrat,sans-serif"}}>{part.slice(2,-2)}</strong>;
+    }
+    if(part.startsWith("*")&&part.endsWith("*")&&part.length>2) {
+      return <strong key={i} style={{fontWeight:700,color:B.forest,fontFamily:"Montserrat,sans-serif"}}>{part.slice(1,-1)}</strong>;
     }
     return part;
   });
@@ -144,8 +166,10 @@ function Stat({label,value,sub,color,accent}) {
 }
 function Card({title,children}) {
   return <div style={{background:B.white,border:`1px solid ${B.bord}`,borderRadius:"8px",padding:"22px",marginBottom:"16px",boxShadow:"0 2px 12px rgba(30,61,47,.06)"}}>
-    <div style={{fontSize:"14px",letterSpacing:".08em",color:B.forest,textTransform:"uppercase",marginBottom:"18px",paddingBottom:"12px",borderBottom:`2px solid ${B.gold}`,display:"flex",alignItems:"center",gap:"11px",fontFamily:"Montserrat,sans-serif",fontWeight:800}}>
-      <span style={{display:"inline-block",width:"4px",height:"18px",borderRadius:"2px",background:B.gold,flexShrink:0}}/><span>{title}</span>
+    <div style={{marginBottom:"18px"}}>
+      <div style={{width:"34px",height:"3px",borderRadius:"2px",background:B.gold,marginBottom:"9px"}}/>
+      <div style={{fontSize:"13px",letterSpacing:".13em",color:B.forest,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:800}}>{title}</div>
+      <div style={{height:"1px",marginTop:"9px",background:"linear-gradient(90deg, rgba(200,149,42,.5) 0%, rgba(200,149,42,.1) 45%, rgba(200,149,42,0) 100%)"}}/>
     </div>
     {children}
   </div>;
@@ -368,23 +392,40 @@ Remaining Stock: ${baristaData.remaining.map(r=>r.item+" ("+r.qty+")").join(", "
 Spoilage: ${baristaData.spoilage.length?baristaData.spoilage.map(r=>r.item+" x"+r.qty).join(", "):"None reported"}
 Sweets from Zahil: ${baristaData.sweets.length?baristaData.sweets.map(r=>r.item+" x"+r.qty).join(", ")+" = "+baristaData.sweetsTotal+" OMR":"N/A"}`:"Not provided this month"}
 
-Write EXACTLY these 6 sections as markdown H3 headings (prefix each with "### "), do not skip any. Do NOT use any emoji or icons anywhere in the report — keep it clean and professional:
+You are writing for TWO busy shop owners who are NOT accountants. The report must be genuinely engaging to read — not a dry data dump. Use plain, confident language and light behavioral-psychology craft so the numbers actually land and drive action:
+- PRIMACY: open every section with a one-sentence **bold bottom line** — the single thing they'd want to know if they read nothing else.
+- RELATABILITY: translate big numbers into things owners feel — per day, per cup, share of sales, "money in the till", or "X rials out of every 100".
+- FRAMING & LOSS AVERSION: state risks in terms of what's at stake or what it's costing, but stay factual and calm — never alarmist or salesy.
+- CONTRAST & STORY: connect the numbers into a short narrative (what changed, why it matters, what to do) instead of listing them.
+- CLOSURE: end sections that need it with ONE clear, confident, do-this-next recommendation.
+Keep paragraphs to 2-3 sentences. Vary sentence length. Never invent numbers — only use the data above.
+
+FORMATTING: markdown only. Section titles are H3 (prefix "### "). For emphasis and sub-labels use **double asterisks** — NEVER single asterisks. No emoji or icons anywhere.
+
+Write EXACTLY these 6 sections, do not skip any:
+
 ### MONTHLY OVERVIEW — ${acctSheet}
-One paragraph summary including year-on-year sales comparison if available.
+Bold bottom line first: is the month up or down, and by how much versus the same month last year, said in money they feel. Then one tight paragraph of context. End with the single thing to keep an eye on.
+
 ### SALES RECONCILIATION
-Accountant vs POS. Cash risk. Data errors.
+Bold verdict first: do the accountant's books and the POS agree — yes, close enough, or no? Then tell it as a story: what the variance actually means, whether it's harmless rounding or a real cash-handling risk, and exactly where to look. Use a concrete frame like "for every 100 rials rung up, X reached the books." Name any specific data errors. Keep it reassuring where the numbers are fine, direct where they aren't.
+
 ### EXPENSES & PROFIT
-Categorized expenses. Profit calculation.
+Bold bottom line first: did the shop make or lose money this month, and the figure — plus one honest sentence on why (e.g. a big one-off outlay). Group the bank expenses under **bold category sub-labels** (e.g. **Salaries**, **Coffee Beans**, **Capital Expenditure — Seating Area**), each line a bullet with a subtotal, and add ONE sentence of insight per group separating one-off investments from recurring running costs so the profit isn't misread. Make the money relatable (per day / share of sales). Close with the single lever that would most improve profit.
+
 ### MENU PERFORMANCE
-• Top 5 by revenue (name, qty, OMR)
-• Top 5 by quantity sold
-• Bottom 3 slowest items
-• Best category
-• One recommendation
+Tell the menu's story, don't just list it. Bold lead: what is carrying the shop right now. Then, as short labelled groups (use **bold sub-labels**):
+- **The heroes** — top 5 by revenue (name, qty, OMR) and what they have in common
+- **Volume vs value** — top 5 by quantity; flag any high-volume, low-margin traps
+- **The dead weight** — bottom 3 slowest; for each say keep, fix, or cut
+- **Standout category** — which one and why
+End with ONE specific recommendation the owners can act on this week.
+
 ### STOCK & SPOILAGE
-Summarize purchased items, remaining stock, spoilage, and sweets cost. Flag any spoilage concerns or stock issues.
+Summarize purchased items, remaining stock, spoilage, and sweets cost in plain language. Flag any spoilage or stock concerns and what they imply for cost control.
+
 ### FLAGS & ACTION ITEMS
-Numbered list of issues requiring attention.`;
+A numbered list, most important first. Each item: the issue, why it matters (in money or risk), and the exact next step to take.`;
     try{
       const res=await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json","x-app-password":getPw()},body:JSON.stringify({prompt})});
       if(res.status===401){ logout(); setAiReport(""); setAiError("Session expired. Please sign in again."); setAiLoad(false); return; }
@@ -490,7 +531,7 @@ Numbered list of issues requiring attention.`;
     </div>;
   }
 
-  return <div style={{minHeight:"100vh",background:"radial-gradient(1100px 520px at 50% -8%, rgba(200,149,42,.10), transparent 60%), linear-gradient(168deg, #faf7f0 0%, #f1eadd 46%, #ebe1d0 100%)",backgroundAttachment:"fixed",color:B.txtD,fontFamily:"Source Sans 3,sans-serif"}}>
+  return <div style={{minHeight:"100vh",background:`${TEXTURE}, radial-gradient(1100px 520px at 50% -8%, rgba(200,149,42,.10), transparent 60%), linear-gradient(168deg, #faf7f0 0%, #f1eadd 46%, #ebe1d0 100%)`,color:B.txtD,fontFamily:"Source Sans 3,sans-serif"}}>
     <style>{css}</style>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Source+Sans+3:wght@400;600&display=swap"/>
 
