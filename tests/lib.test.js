@@ -358,4 +358,16 @@ describe("generatePDF", () => {
     // the raw markdown row must not survive as a paragraph
     expect(out).not.toContain("<p>| Cash | 52.900");
   });
+  it("escapes structured data fields so names with <, >, & can't break the HTML", () => {
+    const posDataX = {
+      summary: { totalSales: 1000, cash: 400, visa: 400, mastercard: 200, card: 600, discount: 0, tips: 0, receipts: 100, pax: 120, netSales: 1000 },
+      categories: [{ name: "Cold & Hot <Bar>", qty: 100, amount: 500 }],
+      serviceTypes: [{ name: "DINE IN", qty: 60, amount: 600 }],
+      menuItems: [{ name: "Tom & Jerry <XL>", qty: 50, amount: 400, avg: 8 }],
+    };
+    const out = generatePDF("# R", rec, posDataX, bankTxns, "MAY 2026", [], baristaData);
+    expect(out).toContain("Tom &amp; Jerry &lt;XL&gt;");
+    expect(out).not.toContain("Tom & Jerry <XL>");
+    expect(out).toContain("Cold &amp; Hot &lt;Bar&gt;");
+  });
 });
