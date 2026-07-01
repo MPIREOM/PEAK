@@ -251,7 +251,7 @@ export default function App() {
   };
 
   const analyse=async()=>{
-    const r=reconcile(acctData,posData);
+    const r=reconcile(acctData,posData.summary);
     setRec(r);setTab("overview");setAiReport("");setApproved(false);setAiError("");
     setAiLoad(true);
     const deb=bankTxns?bankTxns.filter(t=>t.type==="debit"):[];

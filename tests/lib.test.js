@@ -142,6 +142,15 @@ describe("reconcile", () => {
     expect(r.cashVar).toBe(0);
     expect(r.cardVar).toBe(0);
   });
+  it("computes a non-zero variance from the full parsePOS result shape", () => {
+    // The app passes the wrapped { summary, ... } object; variance must still
+    // be real numbers, not NaN silently formatted as 0.
+    const acct = [{ totalSale: 1928.7, cash: 100, creditCard: 1828.7, netSale: 1740.05, purchase: 188.65 }];
+    const pos = { summary: { totalSales: 2006.3, cash: 58.5, card: 1940.52 } };
+    const r = reconcile(acct, pos);
+    expect(r.salesVar).toBeCloseTo(77.6);
+    expect(Number.isNaN(r.salesVar)).toBe(false);
+  });
 });
 
 describe("categorizeExpense", () => {
