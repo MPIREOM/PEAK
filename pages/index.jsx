@@ -15,6 +15,13 @@ const B = {
   sYell:"#8a6518",  sYellBg:"#fef8ec",  sYellBd:"#e8d8a0",
 };
 
+// Strip emoji / pictographs (and any leftover leading punctuation) so headings
+// stay clean even if the model emits them.
+const EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{FE00}-\u{FE0F}\u{200D}]/gu;
+function stripEmoji(s) {
+  return String(s).replace(EMOJI_RE, "").replace(/^\s*[-–—•:]+\s*/, "").trim();
+}
+
 // Simple markdown renderer
 function renderMD(text) {
   if(!text) return null;
@@ -52,13 +59,15 @@ function renderMD(text) {
     // Skip --- dividers
     if(line.trim()==="---"||line.trim()==="***"||line.trim()==="___") continue;
     // H1
-    if(line.startsWith("# ")) { elements.push(<div key={key++} style={{fontSize:20,fontWeight:800,color:B.forest,fontFamily:"Montserrat,sans-serif",marginBottom:8,marginTop:16}}>{line.slice(2)}</div>); continue; }
+    if(line.startsWith("# ")) { elements.push(<div key={key++} style={{fontSize:20,fontWeight:800,color:B.forest,fontFamily:"Montserrat,sans-serif",marginBottom:8,marginTop:16}}>{stripEmoji(line.slice(2))}</div>); continue; }
     // H2
-    if(line.startsWith("## ")) { elements.push(<div key={key++} style={{fontSize:16,fontWeight:700,color:B.forest,fontFamily:"Montserrat,sans-serif",marginBottom:6,marginTop:14}}>{line.slice(3)}</div>); continue; }
-    // H3 — section headers like ### ☕ MENU PERFORMANCE
+    if(line.startsWith("## ")) { elements.push(<div key={key++} style={{fontSize:16,fontWeight:700,color:B.forest,fontFamily:"Montserrat,sans-serif",marginBottom:6,marginTop:14}}>{stripEmoji(line.slice(3))}</div>); continue; }
+    // H3 — section headers. A slim gold bar replaces the old emoji icons.
     if(line.startsWith("### ")) {
-      const txt = line.slice(4);
-      elements.push(<div key={key++} style={{fontSize:14,letterSpacing:".08em",color:B.forest,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:800,marginTop:28,marginBottom:14,paddingBottom:11,borderBottom:`2px solid ${B.gold}`,display:"flex",alignItems:"center",gap:9}}>{txt}</div>);
+      const txt = stripEmoji(line.slice(4));
+      elements.push(<div key={key++} style={{fontSize:14,letterSpacing:".08em",color:B.forest,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:800,marginTop:28,marginBottom:14,paddingBottom:11,borderBottom:`2px solid ${B.gold}`,display:"flex",alignItems:"center",gap:10}}>
+        <span style={{display:"inline-block",width:4,height:16,borderRadius:2,background:B.gold,flexShrink:0}}/><span>{txt}</span>
+      </div>);
       continue;
     }
     // Bullet points
@@ -133,10 +142,10 @@ function Stat({label,value,sub,color,accent}) {
     <div style={{fontSize:"9px",color:B.txtM,letterSpacing:".12em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:600}}>{label}</div>
   </div>;
 }
-function Card({title,icon,children}) {
+function Card({title,children}) {
   return <div style={{background:B.white,border:`1px solid ${B.bord}`,borderRadius:"8px",padding:"22px",marginBottom:"16px",boxShadow:"0 2px 12px rgba(30,61,47,.06)"}}>
     <div style={{fontSize:"14px",letterSpacing:".08em",color:B.forest,textTransform:"uppercase",marginBottom:"18px",paddingBottom:"12px",borderBottom:`2px solid ${B.gold}`,display:"flex",alignItems:"center",gap:"11px",fontFamily:"Montserrat,sans-serif",fontWeight:800}}>
-      {icon&&<span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:"28px",height:"28px",borderRadius:"7px",background:"rgba(200,149,42,.15)",fontSize:"15px",flexShrink:0}}>{icon}</span>}<span>{title}</span>
+      <span style={{display:"inline-block",width:"4px",height:"18px",borderRadius:"2px",background:B.gold,flexShrink:0}}/><span>{title}</span>
     </div>
     {children}
   </div>;
@@ -341,13 +350,14 @@ ${(()=>{
       const beans = calcBeans(posData, effBarista);
       if(!beans) return "";
       return `
-COFFEE BEANS ANALYSIS:
+COFFEE BEANS ANALYSIS (all bean weights below are already in GRAMS, converted from the kg/g the barista wrote — treat them as correct, do NOT suggest the units are wrong):
 Coffee drinks sold: ${beans.totalCoffeeDrinks}
-Expected beans consumed (${GRAMS_PER_DRINK}g/drink): ${beans.beansConsumedCalc}g
-Beans purchased this month: ${effBarista?.beansPurchased>0?effBarista.beansPurchased+"g":"Not provided"}
-Beans remaining (end of month): ${effBarista?.beansRemaining>0?effBarista.beansRemaining+"g":"Not provided"}
+Expected beans consumed (rough ${GRAMS_PER_DRINK}g/drink flat estimate): ${beans.beansConsumedCalc}g
+Beans purchased this month: ${effBarista?.beansPurchased>0?effBarista.beansPurchased+"g":"Not provided"}${effBarista?.beansPurchasedList?.length?" ("+effBarista.beansPurchasedList.map(r=>r.item+" "+r.grams+"g").join(", ")+")":""}
+Beans remaining (end of month): ${effBarista?.beansRemaining>0?effBarista.beansRemaining+"g":"Not provided"}${effBarista?.beansRemainingList?.length?" ("+effBarista.beansRemainingList.map(r=>r.item+" "+r.grams+"g").join(", ")+")":""}
 Beginning stock: ${beans.begin!==null?beans.begin+"g"+(baristaData?.beansBegin==null?" (carried forward from last month)":""):"Not provided"}
-Actual beans consumed (from stock): ${beans.beansConsumedActual!==null?beans.beansConsumedActual+"g":"Not provided"}
+Actual beans consumed (from stock): ${beans.beansConsumedActual!==null?beans.beansConsumedActual+"g":"Cannot compute — beginning stock not provided"}
+Note: the ${GRAMS_PER_DRINK}g/drink figure is a rough flat estimate and expected consumption can legitimately exceed one month's purchases when opening stock carries over. If beginning stock is missing, state that the beginning stock is needed to complete the check — do NOT claim the recorded quantities or units are wrong.
 Discrepancy: ${beans.discrepancy!==null?(beans.discrepancy>=0?"+":"")+beans.discrepancy+"g ("+beans.discPct+"%)":"N/A"}
 Status: ${beans.status.toUpperCase()}
 ${beans.status!=="ok"&&beans.discrepancy!==null?beans.discrepancy>0?"MORE beans used than expected — possible waste, spillage, or unrecorded drinks":"FEWER beans used than expected — possible stocktake error or stock not recorded":""}`;
@@ -358,22 +368,22 @@ Remaining Stock: ${baristaData.remaining.map(r=>r.item+" ("+r.qty+")").join(", "
 Spoilage: ${baristaData.spoilage.length?baristaData.spoilage.map(r=>r.item+" x"+r.qty).join(", "):"None reported"}
 Sweets from Zahil: ${baristaData.sweets.length?baristaData.sweets.map(r=>r.item+" x"+r.qty).join(", ")+" = "+baristaData.sweetsTotal+" OMR":"N/A"}`:"Not provided this month"}
 
-Write EXACTLY these 6 sections — do not skip any:
-📊 MONTHLY OVERVIEW — ${acctSheet}
+Write EXACTLY these 6 sections as markdown H3 headings (prefix each with "### "), do not skip any. Do NOT use any emoji or icons anywhere in the report — keep it clean and professional:
+### MONTHLY OVERVIEW — ${acctSheet}
 One paragraph summary including year-on-year sales comparison if available.
-✅ SALES RECONCILIATION
+### SALES RECONCILIATION
 Accountant vs POS. Cash risk. Data errors.
-💰 EXPENSES & PROFIT
+### EXPENSES & PROFIT
 Categorized expenses. Profit calculation.
-☕ MENU PERFORMANCE
+### MENU PERFORMANCE
 • Top 5 by revenue (name, qty, OMR)
 • Top 5 by quantity sold
 • Bottom 3 slowest items
 • Best category
 • One recommendation
-📦 STOCK & SPOILAGE
+### STOCK & SPOILAGE
 Summarize purchased items, remaining stock, spoilage, and sweets cost. Flag any spoilage concerns or stock issues.
-⚠️ FLAGS & ACTION ITEMS
+### FLAGS & ACTION ITEMS
 Numbered list of issues requiring attention.`;
     try{
       const res=await fetch("/api/generate",{method:"POST",headers:{"Content-Type":"application/json","x-app-password":getPw()},body:JSON.stringify({prompt})});
@@ -435,7 +445,7 @@ Numbered list of issues requiring attention.`;
     setWaSending(false);
   };
 
-    const TABS=[{id:"overview",lbl:"Overview"},{id:"history",lbl:"Sales History"},{id:"daily",lbl:"Daily Breakdown"},{id:"menu",lbl:"Menu Analysis"},{id:"bank",lbl:"Expenses"},{id:"stock",lbl:"Stock & Spoilage"},{id:"beans",lbl:"☕ Beans"},{id:"report",lbl:"Owner Report"}];
+    const TABS=[{id:"overview",lbl:"Overview"},{id:"history",lbl:"Sales History"},{id:"daily",lbl:"Daily Breakdown"},{id:"menu",lbl:"Menu Analysis"},{id:"bank",lbl:"Expenses"},{id:"stock",lbl:"Stock & Spoilage"},{id:"beans",lbl:"Beans"},{id:"report",lbl:"Owner Report"}];
 
   const deb=bankTxns?bankTxns.filter(t=>t.type==="debit"):[];
   const cred=bankTxns?bankTxns.filter(t=>t.type==="credit"):[];
@@ -471,7 +481,7 @@ Numbered list of issues requiring attention.`;
   if(pdfMode && pdfHtml) {
     return <div style={{minHeight:"100vh",background:"#f0f0f0",display:"flex",flexDirection:"column",alignItems:"center",padding:"20px 0"}}>
       <div style={{display:"flex",gap:12,marginBottom:16,position:"sticky",top:0,zIndex:100,background:"#f0f0f0",padding:"12px 20px",borderRadius:8,boxShadow:"0 2px 12px rgba(0,0,0,.15)"}}>
-        <button onClick={()=>window.print()} style={{background:B.forest,color:B.white,border:`2px solid ${B.gold}`,padding:"10px 24px",fontFamily:"Montserrat,sans-serif",fontSize:12,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:6,fontWeight:700}}>🖨 Print / Save as PDF</button>
+        <button onClick={()=>window.print()} style={{background:B.forest,color:B.white,border:`2px solid ${B.gold}`,padding:"10px 24px",fontFamily:"Montserrat,sans-serif",fontSize:12,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:6,fontWeight:700}}>Print / Save as PDF</button>
         <button onClick={()=>setPdfMode(false)} style={{background:B.white,color:B.forest,border:`2px solid ${B.bord}`,padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:12,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:6,fontWeight:700}}>← Back to Report</button>
       </div>
       <style>{`@media print { .no-print { display:none!important; } body { margin:0; } } @page { size:A4; margin:15mm; }`}</style>
@@ -480,7 +490,7 @@ Numbered list of issues requiring attention.`;
     </div>;
   }
 
-  return <div style={{minHeight:"100vh",background:B.cream,color:B.txtD,fontFamily:"Source Sans 3,sans-serif"}}>
+  return <div style={{minHeight:"100vh",background:"radial-gradient(1100px 520px at 50% -8%, rgba(200,149,42,.10), transparent 60%), linear-gradient(168deg, #faf7f0 0%, #f1eadd 46%, #ebe1d0 100%)",backgroundAttachment:"fixed",color:B.txtD,fontFamily:"Source Sans 3,sans-serif"}}>
     <style>{css}</style>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Source+Sans+3:wght@400;600&display=swap"/>
 
@@ -555,7 +565,7 @@ Numbered list of issues requiring attention.`;
 
       {/* Button */}
       <button onClick={analyse} disabled={!canRun} style={{background:canRun?B.forest:B.cream3,color:canRun?B.white:B.txtDim,border:`2px solid ${canRun?B.gold:"transparent"}`,padding:"14px 0",width:"100%",fontFamily:"Montserrat,sans-serif",fontSize:12,letterSpacing:".2em",textTransform:"uppercase",cursor:canRun?"pointer":"not-allowed",borderRadius:6,fontWeight:700,marginBottom:22,boxShadow:canRun?"0 4px 16px rgba(30,61,47,.18)":"none",transition:"all .2s"}}>
-        {canRun?"⛰  Generate Full Month Report":"Upload files above to begin"}
+        {canRun?"Generate Full Month Report":"Upload files above to begin"}
       </button>
 
       {/* Tabs */}
@@ -712,7 +722,7 @@ Numbered list of issues requiring attention.`;
                   const pct=((item.amount/posData.summary.totalSales)*100).toFixed(1);
                   const isTop=i<5,isSlow=i>=posData.menuItems.length-5;
                   return <tr key={item.name} style={{background:isTop?"rgba(200,149,42,.05)":isSlow?"rgba(192,57,43,.03)":"transparent"}}>
-                    <td className="l" style={{fontSize:11,fontFamily:"Montserrat,sans-serif",fontWeight:700,color:isTop?B.gold:B.txtDim}}>{i<3?["🥇","🥈","🥉"][i]:`#${i+1}`}</td>
+                    <td className="l" style={{fontSize:12,fontFamily:"Montserrat,sans-serif",fontWeight:800,color:isTop?B.gold:B.txtDim}}>{`#${i+1}`}</td>
                     <td className="l">{item.name}</td>
                     <td>{item.qty}</td>
                     <td style={{color:isTop?B.forest:B.txtD,fontWeight:isTop?700:400}}>{f(item.amount)}</td>
@@ -750,7 +760,7 @@ Numbered list of issues requiring attention.`;
             </Card>
           </>:<Card title="Bank Statement" icon="🏦">
             <div style={{textAlign:"center",padding:36,color:B.txtDim}}>
-              <div style={{fontSize:32,opacity:.3,marginBottom:12}}>🏦</div>
+              <div style={{width:36,height:36,borderRadius:"50%",border:`2px solid ${B.bord}`,margin:"0 auto 12px"}}/>
               <div style={{fontSize:13}}>Upload your bank .xls file above to see expense analysis here.</div>
             </div>
           </Card>}
@@ -934,7 +944,7 @@ Numbered list of issues requiring attention.`;
             </Card>
           </>:<Card title="Stock & Spoilage" icon="📦">
             <div style={{textAlign:"center",padding:36,color:B.txtDim}}>
-              <div style={{fontSize:32,opacity:.3,marginBottom:12}}>📱</div>
+              <div style={{width:36,height:36,borderRadius:"50%",border:`2px solid ${B.bord}`,margin:"0 auto 12px"}}/>
               <div style={{fontSize:13}}>Paste the barista WhatsApp stock message in the text box above to see analysis here.</div>
             </div>
           </Card>}
@@ -983,7 +993,7 @@ Numbered list of issues requiring attention.`;
                       : `${Math.abs(beans.discrepancy)}g fewer beans consumed than expected — possible stocktake error or unrecorded stock`}
                   </div>}
                 </div>
-                <div style={{fontSize:32}}>{beans.status==="ok"?"✅":beans.status==="warn"?"⚠️":"🚨"}</div>
+                <div style={{width:22,height:22,borderRadius:"50%",background:statusColors[beans.status],flexShrink:0}}/>
               </div>
 
               {/* Coffee drinks breakdown */}
@@ -1085,10 +1095,10 @@ Numbered list of issues requiring attention.`;
                       <button onClick={()=>{
                         const txt="THE PEAK COFFEE SHOP\nMONTHLY OWNER REPORT — "+acctSheet+"\n"+"=".repeat(50)+"\n\n"+aiReport;
                         navigator.clipboard.writeText(txt).then(()=>alert("✓ Report copied to clipboard!")).catch(()=>alert("Could not copy. Please select the report text manually."));
-                      }} style={{background:B.forest,color:B.white,border:`2px solid ${B.gold}`,padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>📋 Copy Report</button>
-                      <button onClick={()=>{const html=generatePDF(aiReport,rec,posData,bankTxns,acctSheet,acctIssues,effBarista); setPdfHtml(html); setPdfMode(true);}} style={{background:B.gold,color:"#12100a",border:"none",padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>📄 View PDF</button>
+                      }} style={{background:B.forest,color:B.white,border:`2px solid ${B.gold}`,padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>Copy Report</button>
+                      <button onClick={()=>{const html=generatePDF(aiReport,rec,posData,bankTxns,acctSheet,acctIssues,effBarista); setPdfHtml(html); setPdfMode(true);}} style={{background:B.gold,color:"#12100a",border:"none",padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>View PDF</button>
                       <button onClick={sendWhatsApp} disabled={waSending} style={{background:waSending?"#7a9e90":B.teal,color:B.white,border:"none",padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:waSending?"not-allowed":"pointer",borderRadius:4,fontWeight:700}}>
-                        {waSending?"📱 Sending...":"📱 Send via WhatsApp"}
+                        {waSending?"Sending...":"Send via WhatsApp"}
                       </button>
                     </div>
                     {waSent.length>0&&<div style={{marginTop:10,padding:"8px 12px",background:B.sGreenBg,border:`1px solid ${B.sGreenBd}`,borderRadius:4}}>
