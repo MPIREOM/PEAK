@@ -265,6 +265,22 @@ describe("calcBeans", () => {
     expect(b.hint).toBeNull();
     expect(b.missing).toEqual([]);
   });
+  it("does not falsely report 'ok' when stock moved but no coffee drinks were counted", () => {
+    // No categories match COFFEE_CATEGORIES -> beansConsumedCalc = 0 -> discPct = null.
+    const noCoffee = { categories: [{ name: "DESSERTS", qty: 12 }], menuItems: [] };
+    const b = calcBeans(noCoffee, { beansBegin: 1000, beansAdded: 0, beansEnd: 200 });
+    expect(b.beansConsumedCalc).toBe(0);
+    expect(b.beansConsumedActual).toBe(800);
+    expect(b.status).toBe("unknown"); // NOT "ok" (the Math.abs(null) bug)
+    expect(b.hint).toMatch(/coffee drinks/i);
+  });
+  it("still reports 'ok' when nothing was consumed and nothing was expected", () => {
+    const noCoffee = { categories: [{ name: "DESSERTS", qty: 12 }], menuItems: [] };
+    const b = calcBeans(noCoffee, { beansBegin: 1000, beansAdded: 0, beansEnd: 1000 });
+    expect(b.beansConsumedCalc).toBe(0);
+    expect(b.beansConsumedActual).toBe(0);
+    expect(b.status).toBe("ok");
+  });
 });
 
 describe("generatePDF", () => {
