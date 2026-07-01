@@ -191,6 +191,22 @@ describe("calcBeans", () => {
     expect(b.discrepancy).toBeNull();
     expect(b.status).toBe("unknown");
   });
+  it("explains what is missing when the barista report is absent", () => {
+    const b = calcBeans(posData, null);
+    expect(b.missing).toContain("barista report");
+    expect(b.hint).toMatch(/barista report/);
+  });
+  it("names the specific missing beans figure when only one is absent", () => {
+    const b = calcBeans(posData, { beansBegin: 2000, beansAdded: 0, beansEnd: null });
+    expect(b.status).toBe("unknown");
+    expect(b.missing).toEqual(["ending beans stock"]);
+    expect(b.hint).toMatch(/ending beans stock/);
+  });
+  it("clears the hint once both stock figures are present", () => {
+    const b = calcBeans(posData, { beansBegin: 2000, beansAdded: 0, beansEnd: 600 });
+    expect(b.hint).toBeNull();
+    expect(b.missing).toEqual([]);
+  });
 });
 
 describe("generatePDF", () => {

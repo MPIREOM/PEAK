@@ -954,6 +954,7 @@ Numbered list of issues requiring attention.`;
                 <div>
                   <div style={{fontSize:10,letterSpacing:".25em",color:statusColors[beans.status],textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:700,marginBottom:4}}>Beans Analysis Status</div>
                   <div style={{fontSize:18,fontWeight:800,color:statusColors[beans.status],fontFamily:"Montserrat,sans-serif"}}>{statusLabels[beans.status]}</div>
+                  {beans.hint&&<div style={{fontSize:12,color:B.txtM,marginTop:4}}>{beans.hint}</div>}
                   {beans.discrepancy!==null&&beans.status!=="ok"&&<div style={{fontSize:12,color:B.txtM,marginTop:4}}>
                     {beans.discrepancy>0
                       ? `${Math.abs(beans.discrepancy)}g more beans consumed than expected — possible waste, spills, or unrecorded drinks`
