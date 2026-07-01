@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as XLSX from "xlsx";
 import { n, f, excelDate } from "../lib/format";
 import { deriveMonthYear, yoy, HISTORICAL_SALES } from "../lib/sales";
-import { parsePOS, parseBarista, reconcile, categorizeExpense } from "../lib/parsers";
+import { parsePOS, parseBarista, parseBank, reconcile, categorizeExpense } from "../lib/parsers";
 import { calcBeans, previousMonthRemaining } from "../lib/beans";
 import { generatePDF } from "../lib/pdf";
 
@@ -107,6 +107,33 @@ describe("parsePOS", () => {
     expect(d.categories.map((c) => c.name)).toContain("Hot Coffee");
     expect(d.serviceTypes.find((s) => s.name === "DINE IN").amount).toBeCloseTo(1727);
     expect(d.menuItems.find((m) => m.name === "Americano").qty).toBe(121);
+  });
+});
+
+describe("parseBank", () => {
+  // Bank exports frequently store amounts as text with thousands separators.
+  // parseFloat("1,234.500") is 1, so amounts must be coerced with n(), not parseFloat.
+  const buildBank = () => {
+    const aoa = [
+      ["Date", "Ref", "X", "Value Date", "Y", "Narration", "Debit", "Credit", "Balance"],
+      [null, null, null, "01/05/2026", null, "Monthly Salary", "1,234.500", null, "5,000.000"],
+      [null, null, null, "10/05/2026", null, "ACH Inward Sales", null, "2,500.750", "7,500.750"],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Statement");
+    return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  };
+
+  it("reads comma-formatted amounts without truncating them to the integer prefix", () => {
+    const txns = parseBank(buildBank());
+    expect(txns).toHaveLength(2);
+    const debit = txns.find((t) => t.type === "debit");
+    const credit = txns.find((t) => t.type === "credit");
+    expect(debit.amount).toBeCloseTo(1234.5); // NOT 1 (the old parseFloat bug)
+    expect(debit.desc).toBe("Monthly Salary");
+    expect(credit.amount).toBeCloseTo(2500.75);
+    expect(debit.balance).toBeCloseTo(5000);
   });
 });
 
