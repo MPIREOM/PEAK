@@ -15,8 +15,11 @@ const B = {
   sYell:"#8a6518",  sYellBg:"#fef8ec",  sYellBd:"#e8d8a0",
 };
 
-// Subtle fractal-noise grain, used as a faint paper texture over the background.
-const TEXTURE = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E\")";
+// Fractal-noise paper grain. A stronger grain for the page background, a
+// gentler one layered onto white cards so the whole report feels textured.
+const grain = (op) => `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='${op}'/%3E%3C/svg%3E")`;
+const TEXTURE = grain(0.16);
+const CARD_TEXTURE = grain(0.05);
 
 // Strip emoji / pictographs (and any leftover leading punctuation) so headings
 // stay clean even if the model emits them.
@@ -165,7 +168,7 @@ function Stat({label,value,sub,color,accent}) {
   </div>;
 }
 function Card({title,children}) {
-  return <div style={{background:B.white,border:`1px solid ${B.bord}`,borderRadius:"8px",padding:"22px",marginBottom:"16px",boxShadow:"0 2px 12px rgba(30,61,47,.06)"}}>
+  return <div style={{background:`${CARD_TEXTURE}, ${B.white}`,border:`1px solid ${B.bord}`,borderRadius:"8px",padding:"22px",marginBottom:"16px",boxShadow:"0 2px 12px rgba(30,61,47,.06)"}}>
     <div style={{marginBottom:"18px"}}>
       <div style={{width:"34px",height:"3px",borderRadius:"2px",background:B.gold,marginBottom:"9px"}}/>
       <div style={{fontSize:"13px",letterSpacing:".13em",color:B.forest,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:800}}>{title}</div>
