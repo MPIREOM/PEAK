@@ -89,6 +89,7 @@ describe("parsePOS", () => {
       ["Payment Summary", null, null],
       ["Cash", "30", 58.5],
       ["VISA", "498", 1940.52],
+      ["Total", "528", 1999.02],
     ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
@@ -97,7 +98,10 @@ describe("parsePOS", () => {
 
     const d = parsePOS(buf);
     expect(d.valid).toBe(true);
-    expect(d.summary.totalSales).toBeCloseTo(2006.3);
+    // POS total is the money actually collected (Payment Summary total),
+    // not gross Total Sales which still includes no-charge items.
+    expect(d.summary.totalSales).toBeCloseTo(1999.02);
+    expect(d.summary.grossSales).toBeCloseTo(2006.3);
     expect(d.summary.cash).toBeCloseTo(58.5);
     expect(d.summary.card).toBeCloseTo(1940.52); // VISA + MASTERCARD
     expect(d.categories.map((c) => c.name)).toContain("Hot Coffee");
