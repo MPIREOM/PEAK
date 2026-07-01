@@ -58,7 +58,7 @@ function renderMD(text) {
     // H3 — section headers like ### ☕ MENU PERFORMANCE
     if(line.startsWith("### ")) {
       const txt = line.slice(4);
-      elements.push(<div key={key++} style={{fontSize:11,letterSpacing:".25em",color:B.forest,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:700,marginTop:24,marginBottom:10,paddingBottom:8,borderBottom:`2px solid ${B.gold}`,display:"flex",alignItems:"center",gap:8}}>{txt}</div>);
+      elements.push(<div key={key++} style={{fontSize:14,letterSpacing:".08em",color:B.forest,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:800,marginTop:28,marginBottom:14,paddingBottom:11,borderBottom:`2px solid ${B.gold}`,display:"flex",alignItems:"center",gap:9}}>{txt}</div>);
       continue;
     }
     // Bullet points
@@ -135,8 +135,8 @@ function Stat({label,value,sub,color,accent}) {
 }
 function Card({title,icon,children}) {
   return <div style={{background:B.white,border:`1px solid ${B.bord}`,borderRadius:"8px",padding:"22px",marginBottom:"16px",boxShadow:"0 2px 12px rgba(30,61,47,.06)"}}>
-    <div style={{fontSize:"10px",letterSpacing:".3em",color:B.forest,textTransform:"uppercase",marginBottom:"16px",paddingBottom:"10px",borderBottom:`2px solid ${B.gold}`,display:"flex",alignItems:"center",gap:"8px",fontFamily:"Montserrat,sans-serif",fontWeight:700}}>
-      {icon&&<span>{icon}</span>}{title}
+    <div style={{fontSize:"14px",letterSpacing:".08em",color:B.forest,textTransform:"uppercase",marginBottom:"18px",paddingBottom:"12px",borderBottom:`2px solid ${B.gold}`,display:"flex",alignItems:"center",gap:"11px",fontFamily:"Montserrat,sans-serif",fontWeight:800}}>
+      {icon&&<span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:"28px",height:"28px",borderRadius:"7px",background:"rgba(200,149,42,.15)",fontSize:"15px",flexShrink:0}}>{icon}</span>}<span>{title}</span>
     </div>
     {children}
   </div>;
