@@ -15,11 +15,8 @@ const B = {
   sYell:"#8a6518",  sYellBg:"#fef8ec",  sYellBd:"#e8d8a0",
 };
 
-// Fractal-noise paper grain. A stronger grain for the page background, a
-// gentler one layered onto white cards so the whole report feels textured.
-const grain = (op) => `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='${op}'/%3E%3C/svg%3E")`;
-const TEXTURE = grain(0.16);
-const CARD_TEXTURE = grain(0.05);
+// Subtle gold diamond-lattice pattern for the page background.
+const PATTERN = "repeating-linear-gradient(45deg, rgba(200,149,42,.09) 0 1px, transparent 1px 22px), repeating-linear-gradient(-45deg, rgba(200,149,42,.09) 0 1px, transparent 1px 22px)";
 
 // Strip emoji / pictographs (and any leftover leading punctuation) so headings
 // stay clean even if the model emits them.
@@ -96,11 +93,14 @@ function renderMD(text) {
       </div>);
       continue;
     }
-    // Whole line wrapped in * or **: a short one is a sub-label (e.g. *Salaries*);
-    // a long one is a bold "bottom line" lead sentence.
-    const subH = line.trim().match(/^\*{1,2}([^*][^*]*?)\*{1,2}$/);
-    if(subH) {
-      const t = subH[1].trim();
+    // A line that starts with * or ** (closing markers optional — the model
+    // sometimes forgets to close them): short -> sub-label, long -> lead.
+    const lt = line.trim();
+    let emInner = null;
+    if(lt.startsWith("**")) emInner = lt.replace(/^\*+/,"").replace(/\*+$/,"").trim();
+    else { const m = lt.match(/^\*([^*].*?)\*$/); if(m) emInner = m[1].trim(); }
+    if(emInner) {
+      const t = emInner;
       if(t.length <= 48) {
         elements.push(<div key={key++} style={{fontSize:12.5,fontWeight:800,color:B.forest,fontFamily:"Montserrat,sans-serif",letterSpacing:".04em",marginTop:16,marginBottom:7,display:"flex",alignItems:"center",gap:8}}>
           <span style={{display:"inline-block",width:6,height:6,transform:"rotate(45deg)",background:B.gold,flexShrink:0}}/>{t}
@@ -168,7 +168,7 @@ function Stat({label,value,sub,color,accent}) {
   </div>;
 }
 function Card({title,children}) {
-  return <div style={{background:`${CARD_TEXTURE}, ${B.white}`,border:`1px solid ${B.bord}`,borderRadius:"8px",padding:"22px",marginBottom:"16px",boxShadow:"0 2px 12px rgba(30,61,47,.06)"}}>
+  return <div style={{background:B.white,border:`1px solid ${B.bord}`,borderRadius:"8px",padding:"22px",marginBottom:"16px",boxShadow:"0 2px 12px rgba(30,61,47,.06)"}}>
     <div style={{marginBottom:"18px"}}>
       <div style={{width:"34px",height:"3px",borderRadius:"2px",background:B.gold,marginBottom:"9px"}}/>
       <div style={{fontSize:"13px",letterSpacing:".13em",color:B.forest,textTransform:"uppercase",fontFamily:"Montserrat,sans-serif",fontWeight:800}}>{title}</div>
@@ -534,7 +534,7 @@ A numbered list, most important first. Each item: the issue, why it matters (in 
     </div>;
   }
 
-  return <div style={{minHeight:"100vh",background:`${TEXTURE}, radial-gradient(1100px 520px at 50% -8%, rgba(200,149,42,.10), transparent 60%), linear-gradient(168deg, #faf7f0 0%, #f1eadd 46%, #ebe1d0 100%)`,color:B.txtD,fontFamily:"Source Sans 3,sans-serif"}}>
+  return <div style={{minHeight:"100vh",background:`${PATTERN}, radial-gradient(1100px 520px at 50% -8%, rgba(200,149,42,.10), transparent 60%), linear-gradient(168deg, #faf7f0 0%, #f1eadd 46%, #ebe1d0 100%)`,color:B.txtD,fontFamily:"Source Sans 3,sans-serif"}}>
     <style>{css}</style>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Source+Sans+3:wght@400;600&display=swap"/>
 

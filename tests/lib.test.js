@@ -281,6 +281,12 @@ describe("generatePDF", () => {
     const noBeans = generatePDF("x", rec, posData, bankTxns, "MAY 2026", [], { spoilage: [] });
     expect(noBeans).not.toContain("Coffee Beans Analysis");
   });
+  it("renders an unterminated **bold lead without leaving literal asterisks", () => {
+    const md = "### MENU\n**Hot and cold coffee together are carrying this shop over 660 OMR";
+    const out = generatePDF(md, rec, posData, bankTxns, "MAY 2026", [], baristaData);
+    expect(out).toContain('<p class="lead">Hot and cold coffee together are carrying this shop over 660 OMR</p>');
+    expect(out).not.toContain("**Hot and cold");
+  });
   it("separates accountant cash purchases from bank expenses in the profit breakdown", () => {
     // rec.acctNet 1400, bank debits total 800 -> Est. Profit 600; cash purchases 160.5 shown separately.
     expect(html).toContain("Cash Purchases");
