@@ -425,7 +425,10 @@ Tell the menu's story, don't just list it. Bold lead: what is carrying the shop 
 End with ONE specific recommendation the owners can act on this week.
 
 ### STOCK & SPOILAGE
-Summarize purchased items, remaining stock, spoilage, and sweets cost in plain language. Flag any spoilage or stock concerns and what they imply for cost control.
+Cover these with **bold sub-labels**, do not omit any:
+- **Coffee beans** — state beans bought and beans remaining (in kg/g), coffee drinks sold, and the expected-vs-actual usage check. If the beginning bean stock is missing, say plainly that beans purchased and remaining WERE recorded but the month's STARTING bean stock is needed to finish the waste check (it fills in automatically from next month) — never say the beans data is missing when purchased/remaining are present.
+- **Stock & purchases** — notable purchased items and remaining stock levels; flag anything running low or overstocked.
+- **Spoilage & sweets** — any spoilage concerns and the sweets cost, and what they mean for cost control.
 
 ### FLAGS & ACTION ITEMS
 A numbered list, most important first. Each item: the issue, why it matters (in money or risk), and the exact next step to take.`;
@@ -1004,25 +1007,25 @@ A numbered list, most important first. Each item: the issue, why it matters (in 
 
           return <div style={{animation:"fade .3s ease"}}>
 
-            {/* Beans notice */}
-            {(!baristaData?.beansBegin && !baristaData?.beansEnd) && <div style={{background:B.sYellBg,border:`1px solid ${B.sYellBd}`,borderLeft:`4px solid ${B.gold}`,borderRadius:6,padding:"12px 16px",marginBottom:16,fontSize:12,color:B.sYell,lineHeight:1.75}}>
-              <strong style={{fontFamily:"Montserrat,sans-serif",fontSize:11}}>BEANS STOCK DATA MISSING</strong><br/>
-              Add the following to your barista WhatsApp message each month:<br/><br/>
-              <code style={{background:"rgba(0,0,0,.06)",padding:"8px 12px",borderRadius:4,display:"block",fontSize:12,lineHeight:2,fontFamily:"monospace"}}>
-                COFFEE BEANS STOCK<br/>
-                Beginning stock : 1000g<br/>
-                Added mid-month : 1000g<br/>
-                End of month    : 200g
-              </code>
+            {/* Beans notice — only when we have NOTHING at all */}
+            {beans && beans.added===0 && beans.end===null && beans.begin===null && <div style={{background:B.sYellBg,border:`1px solid ${B.sYellBd}`,borderLeft:`4px solid ${B.gold}`,borderRadius:6,padding:"12px 16px",marginBottom:16,fontSize:12,color:B.sYell,lineHeight:1.75}}>
+              <strong style={{fontFamily:"Montserrat,sans-serif",fontSize:11}}>NO BEANS STOCK DATA FOUND</strong><br/>
+              Add a beans section to your barista message, e.g. a <strong>PURCHASED BEANS</strong> list and a <strong>COFFEE BEANS REMAINING STOCK</strong> list (in kg or g).
+            </div>}
+
+            {/* Beginning-stock prompt — data was read, only the starting stock is missing */}
+            {beans && (beans.added>0 || beans.end!==null) && beans.begin===null && <div style={{background:B.sYellBg,border:`1px solid ${B.sYellBd}`,borderLeft:`4px solid ${B.gold}`,borderRadius:6,padding:"12px 16px",marginBottom:16,fontSize:12.5,color:B.sYell,lineHeight:1.7}}>
+              <strong style={{fontFamily:"Montserrat,sans-serif",fontSize:11}}>ONE MORE NUMBER NEEDED</strong><br/>
+              We read your beans fine{effBarista?.beansPurchased>0?` — ${effBarista.beansPurchased}g purchased`:""}{effBarista?.beansRemaining>0?` and ${effBarista.beansRemaining}g remaining`:""}. To calculate usage vs sales we also need the <strong>starting bean stock</strong> for this month (what you had on hand on day 1). Add a line like <code style={{background:"rgba(0,0,0,.06)",padding:"1px 6px",borderRadius:3,fontFamily:"monospace"}}>Beginning beans stock : 10kg</code> to the barista message — or just run it next month and it fills in automatically from the remaining stock you entered this month.
             </div>}
 
             {/* Stats */}
             {beans&&<>
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
-                <Stat label="Total Available" value={beans.totalAvailable!==null?beans.totalAvailable+"g":"—"} sub={beans.begin!==null?`${beans.begin}g + ${beans.added}g added`:"No stock data"} color={B.forest} accent={B.forest}/>
-                <Stat label="Expected Consumed" value={beans.beansConsumedCalc+"g"} sub={`${beans.totalCoffeeDrinks} drinks × ${GRAMS_PER_DRINK}g`} color={B.midBlue||B.teal} accent={B.teal}/>
-                <Stat label="Actual Consumed" value={beans.beansConsumedActual!==null?beans.beansConsumedActual+"g":"—"} sub={beans.end!==null?`${beans.begin+beans.added}g − ${beans.end}g remaining`:"No end stock data"} color={beans.status==="ok"?B.sGreen:beans.status==="bad"?B.sRed:B.gold} accent={beans.status==="ok"?B.sGreen:beans.status==="bad"?B.sRed:B.gold}/>
-                <Stat label="Discrepancy" value={beans.discrepancy!==null?(beans.discrepancy>=0?"+":"")+beans.discrepancy+"g":"—"} sub={beans.discPct!==null?Math.abs(beans.discPct)+"% variance":"—"} color={statusColors[beans.status]} accent={statusColors[beans.status]}/>
+                <Stat label="Beans Purchased" value={beans.added>0?beans.added+"g":"—"} sub={beans.added>0?(beans.added/1000).toFixed(2)+"kg this month":"none recorded"} color={B.forest} accent={B.forest}/>
+                <Stat label="Beans Remaining" value={beans.end!==null?beans.end+"g":"—"} sub={beans.end!==null?(beans.end/1000).toFixed(2)+"kg at month-end":"none recorded"} color={B.gold} accent={B.gold}/>
+                <Stat label="Expected Use (sales)" value={beans.beansConsumedCalc+"g"} sub={`${beans.totalCoffeeDrinks} drinks × ${GRAMS_PER_DRINK}g`} color={B.teal} accent={B.teal}/>
+                <Stat label="Actual Use / Variance" value={beans.beansConsumedActual!==null?beans.beansConsumedActual+"g":"needs start stock"} sub={beans.discrepancy!==null?(beans.discrepancy>=0?"+":"")+beans.discrepancy+"g ("+Math.abs(beans.discPct)+"%)":"add beginning stock"} color={statusColors[beans.status]} accent={statusColors[beans.status]}/>
               </div>
 
               {/* Status banner */}
