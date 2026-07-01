@@ -21,9 +21,34 @@ function renderMD(text) {
   const lines = text.split("\n");
   const elements = [];
   let key = 0;
+  const isTableRow = (l) => !!l && l.trim().startsWith("|");
+  const isTableSep = (l) => !!l && /^\s*\|?[\s:|-]+\|?\s*$/.test(l) && l.includes("-") && l.includes("|");
+  const tableCells = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
 
   for(let i=0; i<lines.length; i++){
     const line = lines[i];
+    // Markdown table: header row, |---|--- separator, then body rows
+    if(isTableRow(line) && isTableSep(lines[i+1])) {
+      const header = tableCells(line);
+      const body = [];
+      i += 2;
+      while(i<lines.length && isTableRow(lines[i]) && !isTableSep(lines[i])) { body.push(tableCells(lines[i])); i++; }
+      i--; // for-loop will advance past the last consumed row
+      elements.push(
+        <div key={key++} style={{overflowX:"auto",margin:"12px 0 18px"}}>
+          <table>
+            <thead><tr>{header.map((h,ci)=><th key={ci} className={ci===0?"l":undefined}>{inlineFormat(h)}</th>)}</tr></thead>
+            <tbody>{body.map((r,ri)=>{
+              const isTotal=/total/i.test(r[0]||"");
+              return <tr key={ri} style={isTotal?{fontWeight:700,background:"rgba(200,149,42,.08)"}:undefined}>
+                {r.map((c,ci)=><td key={ci} className={ci===0?"l":undefined} style={isTotal&&ci===0?{color:B.forest}:undefined}>{inlineFormat(c)}</td>)}
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
     // Skip --- dividers
     if(line.trim()==="---"||line.trim()==="***"||line.trim()==="___") continue;
     // H1

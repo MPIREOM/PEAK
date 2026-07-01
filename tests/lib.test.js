@@ -234,4 +234,22 @@ describe("generatePDF", () => {
     const noBeans = generatePDF("x", rec, posData, bankTxns, "MAY 2026", [], { spoilage: [] });
     expect(noBeans).not.toContain("Coffee Beans Analysis");
   });
+  it("renders a markdown table in the report body as an HTML table, not raw pipes", () => {
+    const md = [
+      "## SALES RECONCILIATION",
+      "",
+      "| Item | Accountant | POS | Variance |",
+      "|---|---|---|---|",
+      "| Cash | 52.900 OMR | 58.500 OMR | +5.600 OMR |",
+      "| Card | 1,875.800 OMR | 1,940.520 OMR | +64.720 OMR |",
+      "| **Total** | 1,928.700 OMR | 1,999.020 OMR | +70.320 OMR |",
+    ].join("\n");
+    const out = generatePDF(md, rec, posData, bankTxns, "MAY 2026", [], baristaData);
+    expect(out).toContain('<table class="md-table">');
+    expect(out).toContain("<th>Accountant</th>");
+    expect(out).toContain("<td>+5.600 OMR</td>");
+    expect(out).toContain('<tr class="total">');
+    // the raw markdown row must not survive as a paragraph
+    expect(out).not.toContain("<p>| Cash | 52.900");
+  });
 });
