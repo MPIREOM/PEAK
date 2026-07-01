@@ -1045,7 +1045,7 @@ Numbered list of issues requiring attention.`;
                         </div>
                   ))}
                 </div>
-                {baristaData&&baristaData.beansBegin==null&&beans.begin!==null&&<div style={{marginTop:10,fontSize:11,color:B.txtDim,fontStyle:"italic"}}>Opening stock carried forward from last month's remaining ({beans.begin}g).</div>}
+                {baristaData&&baristaData.beansBegin==null&&beans.begin!==null&&<div style={{marginTop:10,fontSize:11,color:B.txtDim,fontStyle:"italic"}}>{`Opening stock carried forward from last month's remaining (${beans.begin}g).`}</div>}
                 {beans.end!==null&&<div style={{marginTop:12,padding:"10px 14px",background:B.cream2,borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontSize:12,color:B.txtM}}>Actual consumed (from stock): <strong style={{color:B.forest,fontFamily:"Montserrat,sans-serif"}}>{beans.beansConsumedActual}g</strong></span>
                   <span style={{fontSize:12,color:B.txtM}}>Expected from POS: <strong style={{color:B.teal,fontFamily:"Montserrat,sans-serif"}}>{beans.beansConsumedCalc}g</strong></span>
