@@ -234,6 +234,16 @@ describe("generatePDF", () => {
     const noBeans = generatePDF("x", rec, posData, bankTxns, "MAY 2026", [], { spoilage: [] });
     expect(noBeans).not.toContain("Coffee Beans Analysis");
   });
+  it("separates accountant cash purchases from bank expenses in the profit breakdown", () => {
+    // rec.acctNet 1400, bank debits total 800 -> Est. Profit 600; cash purchases 160.5 shown separately.
+    expect(html).toContain("Cash Purchases");
+    expect(html).toContain("Bank Expenses");
+    expect(html).toContain(rec.acctPurchase.toFixed(3)); // cash purchases figure appears
+    expect(html).toContain('class="profit-band"');
+    expect(html).toContain('class="profit-note"');
+    // Est. Profit uses bank expenses (1400 - 800 = 600.000), not net - cash purchases
+    expect(html).toContain("600.000");
+  });
   it("renders a markdown table in the report body as an HTML table, not raw pipes", () => {
     const md = [
       "## SALES RECONCILIATION",

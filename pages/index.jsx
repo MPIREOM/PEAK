@@ -298,10 +298,12 @@ Net Sales: ${r.acctNet.toFixed(3)} OMR | Purchases deducted: ${r.acctPurchase.to
 Bank Credits vs VISA: ${totCred.toFixed(3)} vs ${posData.summary.visa.toFixed(3)} OMR | Variance: ${bankCredVar>=0?"+":""}${bankCredVar.toFixed(3)} OMR
 Data issues in Excel: ${acctIssues.length?acctIssues.map(i=>i.date+": "+i.issue).join("; "):"None"}
 
-EXPENSES (Bank Debits):
+CASH PURCHASES (from accountant report, paid from the till — separate from and NOT included in the bank expenses below): ${r.acctPurchase.toFixed(3)} OMR
+
+EXPENSES (Bank Debits — salaries, VAT, supplier transfers, etc.):
 ${expStr}
-Total Expenses: ${totExp>0?totExp.toFixed(3)+" OMR":"Not provided"}
-Estimated Profit: ${totExp>0?(r.acctNet-totExp).toFixed(3)+" OMR":"N/A"}
+Total Bank Expenses: ${totExp>0?totExp.toFixed(3)+" OMR":"Not provided"}
+Estimated Profit (Net Sales − Total Bank Expenses): ${totExp>0?(r.acctNet-totExp).toFixed(3)+" OMR":"N/A"}
 
 MENU (POS): Receipts: ${posData.summary.receipts} | Guests: ${posData.summary.pax}
 Dine In: ${(posData.serviceTypes.find(s=>s.name.toUpperCase().includes("DINE"))?.amount||0).toFixed(3)} OMR | Takeaway: ${(posData.serviceTypes.find(s=>s.name.toUpperCase().includes("TAKE"))?.amount||0).toFixed(3)} OMR
@@ -578,7 +580,7 @@ Numbered list of issues requiring attention.`;
             <Stat label="Accountant Total" value={f(rec.acctTotal)} sub="OMR"/>
             <Stat label="POS Total" value={f(posData.summary.totalSales)} sub="OMR"/>
             <Stat label="Net Sales" value={f(rec.acctNet)} sub="OMR"/>
-            <Stat label="Purchases" value={f(rec.acctPurchase)} sub="OMR" color={B.sYell} accent={B.sYell}/>
+            <Stat label="Cash Purchases" value={f(rec.acctPurchase)} sub="OMR" color={B.sYell} accent={B.sYell}/>
             <Stat label="Sales Variance" value={(rec.salesVar>=0?"+":"")+f(rec.salesVar)} sub="OMR" color={Math.abs(rec.salesVar)>10?B.sRed:Math.abs(rec.salesVar)>2?B.gold:B.sGreen} accent={Math.abs(rec.salesVar)>10?B.sRed:Math.abs(rec.salesVar)>2?B.gold:B.sGreen}/>
           </div>
           <Card title="Accountant vs POS Reconciliation" icon="⚖">
@@ -705,11 +707,12 @@ Numbered list of issues requiring attention.`;
         {tab==="bank"&&<div style={{animation:"fade .3s ease"}}>
           {bankTxns&&bankTxns.length>0?<>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
-              <Stat label="Total Expenses" value={f(totExp)} sub="OMR" color={B.sRed} accent={B.sRed}/>
+              <Stat label="Bank Expenses" value={f(totExp)} sub="OMR" color={B.sRed} accent={B.sRed}/>
               <Stat label="Credits Received" value={f(totCred)} sub="OMR" color={B.sGreen} accent={B.sGreen}/>
               <Stat label="Net Sales" value={f(rec.acctNet)} sub="OMR"/>
-              <Stat label="Est. Profit" value={(rec.acctNet-totExp>=0?"+":"")+f(rec.acctNet-totExp)} sub="Net − Expenses" color={rec.acctNet-totExp>=0?B.sGreen:B.sRed} accent={rec.acctNet-totExp>=0?B.sGreen:B.sRed}/>
+              <Stat label="Est. Profit" value={(rec.acctNet-totExp>=0?"+":"")+f(rec.acctNet-totExp)} sub="Net − Bank Expenses" color={rec.acctNet-totExp>=0?B.sGreen:B.sRed} accent={rec.acctNet-totExp>=0?B.sGreen:B.sRed}/>
             </div>
+            <div style={{fontSize:12,color:B.txtM,margin:"-6px 0 16px",lineHeight:1.6}}>Cash purchases from the accountant report (<strong style={{color:B.forest}}>{f(rec.acctPurchase)} OMR</strong>) are paid from the till and tracked separately — they are <strong>not</strong> included in Bank Expenses above.</div>
             <Card title={`Expenses — Debits (${deb.length})`} icon="💸">
               <div style={{overflowX:"auto"}}><table>
                 <thead><tr><th className="l">Date</th><th className="l">Description</th><th className="l">Raw Narration</th><th>Amount (OMR)</th></tr></thead>
