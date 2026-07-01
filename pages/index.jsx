@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { f } from "../lib/format";
 import { HISTORICAL_SALES, MONTH_NAMES, YEARS, YEAR_COLORS, deriveMonthYear, yoy } from "../lib/sales";
 import { parseAcct, parsePOS, parseBank, parseBarista, reconcile } from "../lib/parsers";
-import { calcBeans, GRAMS_PER_DRINK } from "../lib/beans";
+import { calcBeans, GRAMS_PER_DRINK, previousMonthRemaining } from "../lib/beans";
 import { generatePDF, htmlToPdfBase64 } from "../lib/pdf";
 
 // Brand colors
@@ -188,6 +188,9 @@ export default function App() {
   const [pwBusy,setPwBusy]=useState(false);
   // Draft for the barista paste box (kept separate so the box doesn't unmount mid-typing)
   const [baristaDraft,setBaristaDraft]=useState("");
+  // Beans carry-forward: { "MONTH YEAR": remainingGrams } so a new month's
+  // beginning stock defaults to the previous month's remaining.
+  const [beansHistory,setBeansHistory]=useState({});
 
   // ── AUTH ────────────────────────────────────────────────────────────
   const PW_KEY = "peak_app_pw";
@@ -216,6 +219,7 @@ export default function App() {
           if (d.posData)    { setPosData(d.posData); setPosFile({name: d.posFileName||"Saved"}); }
           if (d.bankTxns)   { setBankTxns(d.bankTxns); setBankFile({name: d.bankFileName||"Saved"}); }
           if (d.baristaData){ setBaristaData(d.baristaData); setBaristaText(d.baristaText||""); }
+          if (d.beansHistory){ setBeansHistory(d.beansHistory); }
         }
       } catch(e) { /* no saved data */ }
     };
@@ -227,17 +231,32 @@ export default function App() {
     const save = async () => {
       if (!acctData && !posData) return;
       try {
+        // Record this month's remaining beans so a later month can carry it
+        // forward as its beginning stock. previousMonthRemaining() only ever
+        // reads strictly-earlier months, so recording the current month here
+        // can't make it reference itself.
+        let hist = beansHistory;
+        if (acctSheet && baristaData?.beansRemaining > 0 && beansHistory[acctSheet] !== baristaData.beansRemaining) {
+          hist = { ...beansHistory, [acctSheet]: baristaData.beansRemaining };
+          setBeansHistory(hist);
+        }
         const payload = {
           acctData, acctSheet, acctIssues, acctFileName: acctFile?.name,
           posData, posFileName: posFile?.name,
           bankTxns, bankFileName: bankFile?.name,
-          baristaData, baristaText,
+          baristaData, baristaText, beansHistory: hist,
         };
         localStorage.setItem("peak_report_data", JSON.stringify(payload));
       } catch(e) { /* storage error */ }
     };
     save();
   }, [acctData, posData, bankTxns, baristaData]);
+
+  // Barista data with beginning beans stock filled in from the previous month
+  // when the current report didn't state one. Used everywhere beans are analysed.
+  const effBarista = baristaData
+    ? { ...baristaData, beansBegin: baristaData.beansBegin ?? previousMonthRemaining(beansHistory, acctSheet) }
+    : baristaData;
 
   const clearSaved = async () => {
     try { localStorage.removeItem("peak_report_data"); } catch {}
@@ -319,12 +338,15 @@ ${(()=>{
     })()}
 ${(()=>{
       if(!posData) return "";
-      const beans = calcBeans(posData, baristaData);
+      const beans = calcBeans(posData, effBarista);
       if(!beans) return "";
       return `
 COFFEE BEANS ANALYSIS:
 Coffee drinks sold: ${beans.totalCoffeeDrinks}
 Expected beans consumed (${GRAMS_PER_DRINK}g/drink): ${beans.beansConsumedCalc}g
+Beans purchased this month: ${effBarista?.beansPurchased>0?effBarista.beansPurchased+"g":"Not provided"}
+Beans remaining (end of month): ${effBarista?.beansRemaining>0?effBarista.beansRemaining+"g":"Not provided"}
+Beginning stock: ${beans.begin!==null?beans.begin+"g"+(baristaData?.beansBegin==null?" (carried forward from last month)":""):"Not provided"}
 Actual beans consumed (from stock): ${beans.beansConsumedActual!==null?beans.beansConsumedActual+"g":"Not provided"}
 Discrepancy: ${beans.discrepancy!==null?(beans.discrepancy>=0?"+":"")+beans.discrepancy+"g ("+beans.discPct+"%)":"N/A"}
 Status: ${beans.status.toUpperCase()}
@@ -386,7 +408,7 @@ Numbered list of issues requiring attention.`;
     let pdfBase64;
     try {
       // Same HTML as the "View PDF" button → owners receive the full report.
-      const html = generatePDF(aiReport, rec, posData, bankTxns, acctSheet, acctIssues, baristaData);
+      const html = generatePDF(aiReport, rec, posData, bankTxns, acctSheet, acctIssues, effBarista);
       pdfBase64 = await htmlToPdfBase64(html);
     } catch(e) {
       setWaError("Could not generate the report PDF: "+e.message);
@@ -920,7 +942,7 @@ Numbered list of issues requiring attention.`;
 
         {/* Beans Tab */}
         {tab==="beans"&&(()=>{
-          const beans = rec ? calcBeans(posData, baristaData) : null;
+          const beans = rec ? calcBeans(posData, effBarista) : null;
           const statusColors = {ok:B.sGreen, warn:B.gold, bad:B.sRed, unknown:B.txtDim};
           const statusBgs    = {ok:B.sGreenBg, warn:B.sYellBg, bad:B.sRedBg, unknown:B.cream2};
           const statusBds    = {ok:B.sGreenBd, warn:B.sYellBd, bad:B.sRedBd, unknown:B.bord};
@@ -1023,6 +1045,7 @@ Numbered list of issues requiring attention.`;
                         </div>
                   ))}
                 </div>
+                {baristaData&&baristaData.beansBegin==null&&beans.begin!==null&&<div style={{marginTop:10,fontSize:11,color:B.txtDim,fontStyle:"italic"}}>Opening stock carried forward from last month's remaining ({beans.begin}g).</div>}
                 {beans.end!==null&&<div style={{marginTop:12,padding:"10px 14px",background:B.cream2,borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontSize:12,color:B.txtM}}>Actual consumed (from stock): <strong style={{color:B.forest,fontFamily:"Montserrat,sans-serif"}}>{beans.beansConsumedActual}g</strong></span>
                   <span style={{fontSize:12,color:B.txtM}}>Expected from POS: <strong style={{color:B.teal,fontFamily:"Montserrat,sans-serif"}}>{beans.beansConsumedCalc}g</strong></span>
@@ -1063,7 +1086,7 @@ Numbered list of issues requiring attention.`;
                         const txt="THE PEAK COFFEE SHOP\nMONTHLY OWNER REPORT — "+acctSheet+"\n"+"=".repeat(50)+"\n\n"+aiReport;
                         navigator.clipboard.writeText(txt).then(()=>alert("✓ Report copied to clipboard!")).catch(()=>alert("Could not copy. Please select the report text manually."));
                       }} style={{background:B.forest,color:B.white,border:`2px solid ${B.gold}`,padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>📋 Copy Report</button>
-                      <button onClick={()=>{const html=generatePDF(aiReport,rec,posData,bankTxns,acctSheet,acctIssues,baristaData); setPdfHtml(html); setPdfMode(true);}} style={{background:B.gold,color:"#12100a",border:"none",padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>📄 View PDF</button>
+                      <button onClick={()=>{const html=generatePDF(aiReport,rec,posData,bankTxns,acctSheet,acctIssues,effBarista); setPdfHtml(html); setPdfMode(true);}} style={{background:B.gold,color:"#12100a",border:"none",padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:"pointer",borderRadius:4,fontWeight:700}}>📄 View PDF</button>
                       <button onClick={sendWhatsApp} disabled={waSending} style={{background:waSending?"#7a9e90":B.teal,color:B.white,border:"none",padding:"10px 20px",fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".15em",textTransform:"uppercase",cursor:waSending?"not-allowed":"pointer",borderRadius:4,fontWeight:700}}>
                         {waSending?"📱 Sending...":"📱 Send via WhatsApp"}
                       </button>

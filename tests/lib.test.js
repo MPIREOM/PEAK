@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import { n, f, excelDate } from "../lib/format";
 import { deriveMonthYear, yoy, HISTORICAL_SALES } from "../lib/sales";
 import { parsePOS, parseBarista, reconcile, categorizeExpense } from "../lib/parsers";
-import { calcBeans } from "../lib/beans";
+import { calcBeans, previousMonthRemaining } from "../lib/beans";
 import { generatePDF } from "../lib/pdf";
 
 describe("format helpers", () => {
@@ -131,6 +131,37 @@ describe("parseBarista", () => {
     expect(b.beansBegin).toBe(1000); // 1kg -> 1000g
     expect(b.beansAdded).toBe(1000);
     expect(b.beansEnd).toBe(200);
+  });
+
+  it("reads per-type PURCHASED BEANS and COFFEE BEANS REMAINING STOCK lists", () => {
+    const beansMsg = [
+      "🔹 PURCHASED BEANS",
+      "1.Brazil minas       : 5kg",
+      "2.Brazil Cerrado     : 3kg",
+      "3.Yamen Haraz        : 400g",
+      "",
+      "COFFEE BEANS REMAINING STOCK",
+      "✓Brazil Cerrado     : 600g",
+      "✓Blend 70:30        : 400g", // colon inside the name must not break parsing
+      "✓Yamen Haraz        : 360g",
+    ].join("\n");
+    const b = parseBarista(beansMsg);
+    expect(b.beansPurchased).toBe(8400); // 5000 + 3000 + 400
+    expect(b.beansRemaining).toBe(1360); // 600 + 400 + 360
+    expect(b.beansAdded).toBe(8400); // falls back to purchased list total
+    expect(b.beansEnd).toBe(1360); // falls back to remaining list total
+    expect(b.beansBegin).toBeNull(); // no beginning provided
+    expect(b.beansRemainingList.find((x) => x.item === "Blend 70:30").grams).toBe(400);
+  });
+});
+
+describe("previousMonthRemaining", () => {
+  it("returns the most recent earlier month's remaining as this month's beginning", () => {
+    const history = { "APRIL 2026": 5000, "MAY 2026": 7070 };
+    expect(previousMonthRemaining(history, "JUNE 2026")).toBe(7070);
+    expect(previousMonthRemaining(history, "MAY 2026")).toBe(5000); // excludes same month
+    expect(previousMonthRemaining(history, "APRIL 2026")).toBeNull(); // nothing earlier
+    expect(previousMonthRemaining({}, "JUNE 2026")).toBeNull();
   });
 });
 
