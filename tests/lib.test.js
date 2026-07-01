@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import * as XLSX from "xlsx";
 import { n, f, excelDate } from "../lib/format";
 import { deriveMonthYear, yoy, HISTORICAL_SALES } from "../lib/sales";
 import { parsePOS, parseBarista, reconcile, categorizeExpense } from "../lib/parsers";
@@ -71,6 +72,37 @@ describe("parsePOS", () => {
     expect(d.categories.map((c) => c.name)).toContain("HOT COFFEE");
     expect(d.menuItems[0].amount).toBeGreaterThanOrEqual(d.menuItems[1].amount);
     expect(d.menuItems.find((m) => m.name === "Cappuccino").avg).toBeCloseTo(6);
+  });
+  it("reads the same report exported as a binary .xlsx", () => {
+    // Build an .xlsx with the label/qty/amount layout the POS exports.
+    const aoa = [
+      ["Total Sales:", null, 2006.3],
+      ["Order type", null, null],
+      ["DINE IN", "433", 1727],
+      ["TAKEAWAY", "95", 272.02],
+      ["Category Summary", null, null],
+      ["Hot Coffee", "384.00", 676.5],
+      ["Cold Coffee", "256.00", 483.1],
+      ["Menu Item", null, null],
+      ["Americano", "121.00", 181.5],
+      ["Cortado", "37.00", 62.9],
+      ["Payment Summary", null, null],
+      ["Cash", "30", 58.5],
+      ["VISA", "498", 1940.52],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Page 1");
+    const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+
+    const d = parsePOS(buf);
+    expect(d.valid).toBe(true);
+    expect(d.summary.totalSales).toBeCloseTo(2006.3);
+    expect(d.summary.cash).toBeCloseTo(58.5);
+    expect(d.summary.card).toBeCloseTo(1940.52); // VISA + MASTERCARD
+    expect(d.categories.map((c) => c.name)).toContain("Hot Coffee");
+    expect(d.serviceTypes.find((s) => s.name === "DINE IN").amount).toBeCloseTo(1727);
+    expect(d.menuItems.find((m) => m.name === "Americano").qty).toBe(121);
   });
 });
 
